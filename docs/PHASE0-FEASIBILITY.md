@@ -6,7 +6,7 @@ required. This milestone contains no shipping CLI, comparison engine, package
 project, or telemetry integration.
 
 Implementation candidate SHA for this evidence set:
-`91ee468de34f14d55d96d642ad753011d29dc44e`
+`aec7790b356628cba0199ec92c28654e6b8084f2`
 
 ## Verdict rule and evidence standard
 
@@ -141,31 +141,14 @@ comparisons reported `MATCH`.
 Linux parity is **unverified on this host**. No Linux hash is claimed.
 
 The required file-backed attempt used image
-`mcr.microsoft.com/dotnet/sdk:10.0.401` and these commands:
-
-```text
-docker create --name logschema-phase0-linux-e63c81cef1f742d688088eff2b6581fe -w /workspace mcr.microsoft.com/dotnet/sdk:10.0.401 bash -lc "set -eu; mkdir -p /workspace/artifacts; dotnet --version | tee /workspace/sdk-version.txt; dotnet restore phase0/Phase0.LogSchemaProbe.csproj --configfile NuGet.config; dotnet restore fixtures/Phase0.Net8/Phase0.Net8.csproj --configfile NuGet.config; dotnet build phase0/Phase0.LogSchemaProbe.csproj -c Release --no-restore --nologo; dotnet phase0/bin/Release/net10.0/Phase0.LogSchemaProbe.dll fixtures/Phase0.Net8/Phase0.Net8.csproj --output artifacts/linux-net8.json --tfm net8.0; sha256sum artifacts/linux-net8.json | tee /workspace/linux.sha256"
-docker cp "<local-temp>\linux-phase0-e63c81cef1f742d688088eff2b6581fe\." "logschema-phase0-linux-e63c81cef1f742d688088eff2b6581fe:/workspace"
-docker start -a logschema-phase0-linux-e63c81cef1f742d688088eff2b6581fe
-```
-
-Observed behavior: `docker create` 0.09s, checkout copy 0.09s, then
-`docker start -a` produced no output through the bridge for about 130 seconds
-and the container remained in `Created` state. The disposable container was
-removed. The host-preparation `robocopy` returned code 1, which is the normal
-successful-copy status for that command, in 0.06s.
-
-A second short pattern was tested independently:
-
-```text
-docker create --name logschema-start-test-25f8850c665f41c6990dee41e05c8c5d mcr.microsoft.com/dotnet/sdk:10.0.401 bash -lc "echo started; dotnet --version"
-docker start -a logschema-start-test-25f8850c665f41c6990dee41e05c8c5d
-```
-
-That start also produced no output during the 10.01-second bridge wait and
-left the container in `Created` state; it was then removed. A detached
-`docker start` was separately attempted with the same no-output/`Created`
-result. These are bridge/runtime observations, not probe results.
+`mcr.microsoft.com/dotnet/sdk:10.0.401`. The attempt created a disposable
+container, copied the repository checkout into a workspace, and attempted to
+restore and build the probe, run it against the net8 fixture, and record the
+resulting SHA-256. Starting the container produced no output through the
+command bridge, and the container remained in `Created` state before it was
+removed. A separate minimal container-start test produced the same no-output
+observation. These are command-bridge/runtime observations, not probe results;
+Linux remains unverified on this host.
 
 A host-independent re-proof requires another host or CI runner with a
 functioning Docker daemon: create the pinned image container, copy the exact
