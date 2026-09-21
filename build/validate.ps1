@@ -26,6 +26,8 @@ Invoke-Timed 'Restore probe' { dotnet restore (Join-Path $repositoryRoot 'phase0
 Invoke-Timed 'Restore net8 fixture' { dotnet restore (Join-Path $repositoryRoot 'fixtures/Phase0.Net8/Phase0.Net8.csproj') --configfile (Join-Path $repositoryRoot 'NuGet.config') }
 Invoke-Timed 'Restore stable fixture' { dotnet restore (Join-Path $repositoryRoot 'fixtures/Phase0.Stable/Phase0.Stable.csproj') --configfile (Join-Path $repositoryRoot 'NuGet.config') }
 Invoke-Timed 'Restore multi-target fixture' { dotnet restore (Join-Path $repositoryRoot 'fixtures/Phase0.Multi/Phase0.Multi.csproj') --configfile (Join-Path $repositoryRoot 'NuGet.config') }
+Invoke-Timed 'Restore pairing fixture' { dotnet restore (Join-Path $repositoryRoot 'fixtures/Phase0.Pairing/Phase0.Pairing.csproj') --configfile (Join-Path $repositoryRoot 'NuGet.config') }
+Invoke-Timed 'Restore sentinel fixture' { dotnet restore (Join-Path $repositoryRoot 'fixtures/Phase0.Sentinel/Phase0.Sentinel.csproj') --configfile (Join-Path $repositoryRoot 'NuGet.config') }
 Invoke-Timed 'Build probe' { dotnet build (Join-Path $repositoryRoot 'phase0/Phase0.LogSchemaProbe.csproj') -c Release --no-restore --nologo }
 
 $probe = Join-Path $repositoryRoot 'phase0/bin/Release/net10.0/Phase0.LogSchemaProbe.dll'

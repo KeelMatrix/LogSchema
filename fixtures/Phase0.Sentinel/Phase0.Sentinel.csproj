@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <AssemblyName>Phase0.Sentinel</AssemblyName>
+    <RootNamespace>Phase0.Sentinel</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <NoWarn>$(NoWarn);CA2255</NoWarn>
+  </PropertyGroup>
+</Project>
