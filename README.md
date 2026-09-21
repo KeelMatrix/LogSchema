@@ -4,7 +4,7 @@
 
 LogSchema is a local .NET tool. It reads SDK-style C# projects through design-time MSBuild/Roslyn APIs and never loads or invokes the target application assembly.
 
-## Install and first use
+## Install
 
 The recommended installation is a repository-pinned local tool manifest:
 
@@ -14,11 +14,13 @@ dotnet tool install KeelMatrix.LogSchema
 logschema capture MyService.csproj --output logschema.json
 ```
 
-Commit the manifest and `logschema.json` after reviewing the contract. For a quick one-off experiment, the alternative is:
+Commit the manifest and `logschema.json` after reviewing the contract. For just trying it, install globally immediately below the local-manifest path:
 
 ```bash
 dotnet tool install --global KeelMatrix.LogSchema
 ```
+
+## Quick start
 
 After an intentional or accidental change:
 
@@ -63,7 +65,7 @@ Intentional changes can be accepted explicitly with repeated `--accept <diagnost
 
 `capture` writes the canonical `logschema.json` (or the path supplied by `--output`). `check` analyzes the current project and compares it with `--baseline`; it never rewrites that file. To update an intentional baseline, run `capture` explicitly, review the diff, and commit the result. `diff` compares two existing manifests offline.
 
-Common options are `--format text|json`, `--severity breaking|warning|all`, `--accept <code>`, and `--no-telemetry`. The telemetry option is reserved and accepted for script portability; v1 emits no telemetry because the bounded company integration is intentionally omitted.
+Common options are `--format text|json`, `--severity breaking|warning|all`, `--accept <code>`, `--no-telemetry`, and `--tfm <target-framework>`. The telemetry option is reserved and accepted for script portability; v1 emits no telemetry because the bounded company integration is intentionally omitted.
 
 ## CI and exit codes
 
@@ -109,6 +111,8 @@ The tool targets `net8.0` and is designed for Windows, Linux, and macOS SDK-styl
 
 No source, manifest, path, project identity, or schema content is uploaded. V1 has no telemetry. LogSchema does not execute target application code and does not read runtime values. Roslyn/MSBuild project evaluation still has the normal trust boundary of the local machine; do not run it on untrusted projects without appropriate isolation. Manifest input is treated as untrusted and is bounded and fail-closed.
 
+See the [security policy](SECURITY.md) and [dependency rationale](docs/DEPENDENCIES.md) for the repository's security and supply-chain details.
+
 ## Troubleshooting
 
 - **Project-load failure:** confirm the SDK is installed, restore the project with its normal package sources, and pass the intended target framework with `--tfm` for a multi-targeted project. The command returns 3 on failure.
@@ -129,3 +133,7 @@ pwsh ./build/validate.ps1
 ```
 
 The Phase 0 semantic probe and fixtures remain in `phase0/` and `fixtures/` as regression evidence. The shipping tool is in `src/KeelMatrix.LogSchema/`; its project-local README is the README input for the later package step.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
