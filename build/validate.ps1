@@ -20,27 +20,54 @@ function Invoke-Timed {
     }
 }
 
+function Assert-That {
+    param([Parameter(Mandatory = $true)][bool]$Condition, [Parameter(Mandatory = $true)][string]$Message)
+    if (-not $Condition) { throw "Assertion failed: $Message" }
+}
+
 $env:KEELMATRIX_NO_TELEMETRY = '1'
 
-Invoke-Timed 'Restore probe' { dotnet restore (Join-Path $repositoryRoot 'phase0/Phase0.LogSchemaProbe.csproj') --configfile (Join-Path $repositoryRoot 'NuGet.config') }
-Invoke-Timed 'Restore net8 fixture' { dotnet restore (Join-Path $repositoryRoot 'fixtures/Phase0.Net8/Phase0.Net8.csproj') --configfile (Join-Path $repositoryRoot 'NuGet.config') }
-Invoke-Timed 'Restore stable fixture' { dotnet restore (Join-Path $repositoryRoot 'fixtures/Phase0.Stable/Phase0.Stable.csproj') --configfile (Join-Path $repositoryRoot 'NuGet.config') }
-Invoke-Timed 'Restore multi-target fixture' { dotnet restore (Join-Path $repositoryRoot 'fixtures/Phase0.Multi/Phase0.Multi.csproj') --configfile (Join-Path $repositoryRoot 'NuGet.config') }
-Invoke-Timed 'Restore pairing fixture' { dotnet restore (Join-Path $repositoryRoot 'fixtures/Phase0.Pairing/Phase0.Pairing.csproj') --configfile (Join-Path $repositoryRoot 'NuGet.config') }
-Invoke-Timed 'Restore sentinel fixture' { dotnet restore (Join-Path $repositoryRoot 'fixtures/Phase0.Sentinel/Phase0.Sentinel.csproj') --configfile (Join-Path $repositoryRoot 'NuGet.config') }
-Invoke-Timed 'Build probe' { dotnet build (Join-Path $repositoryRoot 'phase0/Phase0.LogSchemaProbe.csproj') -c Release --no-restore --nologo }
+Invoke-Timed 'Restore solution' { dotnet restore (Join-Path $repositoryRoot 'LogSchema.slnx') --configfile (Join-Path $repositoryRoot 'NuGet.config') --nologo }
+foreach ($fixture in @(
+    'fixtures/Phase0.Net8/Phase0.Net8.csproj',
+    'fixtures/Phase0.Stable/Phase0.Stable.csproj',
+    'fixtures/Phase0.Multi/Phase0.Multi.csproj',
+    'fixtures/Phase0.Pairing/Phase0.Pairing.csproj',
+    'fixtures/Phase0.Sentinel/Phase0.Sentinel.csproj',
+    'fixtures/Phase0.GeneratedDeclarationGenerator/Phase0.GeneratedDeclarationGenerator.csproj')) {
+    Invoke-Timed "Restore $fixture" { dotnet restore (Join-Path $repositoryRoot $fixture) --configfile (Join-Path $repositoryRoot 'NuGet.config') --nologo }
+}
 
-$probe = Join-Path $repositoryRoot 'phase0/bin/Release/net10.0/Phase0.LogSchemaProbe.dll'
-$net8Project = Join-Path $repositoryRoot 'fixtures/Phase0.Net8/Phase0.Net8.csproj'
-$stableProject = Join-Path $repositoryRoot 'fixtures/Phase0.Stable/Phase0.Stable.csproj'
-$multiProject = Join-Path $repositoryRoot 'fixtures/Phase0.Multi/Phase0.Multi.csproj'
+Invoke-Timed 'Format and analyzer validation' { dotnet format (Join-Path $repositoryRoot 'LogSchema.slnx') --no-restore --verify-no-changes --verbosity minimal }
+Invoke-Timed 'Release build' { dotnet build (Join-Path $repositoryRoot 'LogSchema.slnx') -c Release --no-restore --nologo }
+Invoke-Timed 'Unit and contract tests' { dotnet test (Join-Path $repositoryRoot 'tests/KeelMatrix.LogSchema.Tests/KeelMatrix.LogSchema.Tests.csproj') -c Release --no-build --no-restore --nologo }
+Invoke-Timed 'Phase 0 regression matrix' { & pwsh -NoProfile -NonInteractive -File (Join-Path $repositoryRoot 'build/Test-Phase0Matrix.ps1') }
 
-Invoke-Timed 'Probe net8' { dotnet $probe $net8Project --output (Join-Path $artifactRoot 'net8.json') --tfm net8.0 }
-Invoke-Timed 'Probe stable SDK fixture' { dotnet $probe $stableProject --output (Join-Path $artifactRoot 'stable.json') --tfm net10.0 }
-Invoke-Timed 'Probe multi-target net8' { dotnet $probe $multiProject --output (Join-Path $artifactRoot 'multi-net8.json') --tfm net8.0 }
-Invoke-Timed 'Probe multi-target net10' { dotnet $probe $multiProject --output (Join-Path $artifactRoot 'multi-net10.json') --tfm net10.0 }
+$tool = Join-Path $repositoryRoot 'src/KeelMatrix.LogSchema/bin/Release/net8.0/KeelMatrix.LogSchema.dll'
+$fixtureProject = Join-Path $repositoryRoot 'fixtures/Phase0.Net8/Phase0.Net8.csproj'
+$determinismA = Join-Path $artifactRoot 'determinism-a/logschema.json'
+$determinismB = Join-Path $artifactRoot 'determinism-b/logschema.json'
+Invoke-Timed 'Manifest determinism' {
+    & dotnet $tool capture $fixtureProject --tfm net8.0 --output $determinismA --no-telemetry
+    Assert-That ($LASTEXITCODE -eq 0) 'first deterministic capture must succeed'
+    & dotnet $tool capture $fixtureProject --tfm net8.0 --output $determinismB --no-telemetry
+    Assert-That ($LASTEXITCODE -eq 0) 'second deterministic capture must succeed'
+    $hashA = (Get-FileHash $determinismA -Algorithm SHA256).Hash
+    $hashB = (Get-FileHash $determinismB -Algorithm SHA256).Hash
+    Write-Host "Windows manifest A SHA256: $hashA"
+    Write-Host "Windows manifest B SHA256: $hashB"
+    Assert-That ($hashA -eq $hashB) 'same source must produce byte-identical manifests'
+}
 
-Get-FileHash (Join-Path $artifactRoot 'net8.json') -Algorithm SHA256
-Get-FileHash (Join-Path $artifactRoot 'stable.json') -Algorithm SHA256
-Get-FileHash (Join-Path $artifactRoot 'multi-net8.json') -Algorithm SHA256
-Get-FileHash (Join-Path $artifactRoot 'multi-net10.json') -Algorithm SHA256
+Invoke-Timed 'CLI failure safety' {
+    & dotnet $tool check (Join-Path $repositoryRoot 'does-not-exist.csproj') --baseline $determinismA --format json --no-telemetry | Out-Null
+    Assert-That ($LASTEXITCODE -eq 3) 'project-load failure must return exit 3'
+    $before = (Get-FileHash $determinismA -Algorithm SHA256).Hash
+    & dotnet $tool diff (Join-Path $repositoryRoot 'does-not-exist.json') $determinismA --format json --no-telemetry | Out-Null
+    Assert-That ($LASTEXITCODE -eq 3) 'missing manifest must return exit 3'
+    $after = (Get-FileHash $determinismA -Algorithm SHA256).Hash
+    Assert-That ($before -eq $after) 'failed comparison must not rewrite the baseline'
+    $global:LASTEXITCODE = 0
+}
+
+Write-Host 'Validation passed.'

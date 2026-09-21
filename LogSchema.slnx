@@ -1,4 +1,11 @@
 <Solution>
+  <Folder Name="/src/">
+    <Project Path="src/KeelMatrix.LogSchema.Core/KeelMatrix.LogSchema.Core.csproj" />
+    <Project Path="src/KeelMatrix.LogSchema/KeelMatrix.LogSchema.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/KeelMatrix.LogSchema.Tests/KeelMatrix.LogSchema.Tests.csproj" />
+  </Folder>
   <Folder Name="/phase0/">
     <Project Path="phase0/Phase0.LogSchemaProbe.csproj" />
   </Folder>

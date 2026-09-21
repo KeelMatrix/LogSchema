@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>KeelMatrix.LogSchema</AssemblyName>
+    <RootNamespace>KeelMatrix.LogSchema.Cli</RootNamespace>
+    <IsPackable>true</IsPackable>
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>logschema</ToolCommandName>
+    <PackageId>KeelMatrix.LogSchema</PackageId>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageIcon>icon.png</PackageIcon>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/KeelMatrix/LogSchema</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/KeelMatrix/LogSchema</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageTags>dotnet-tool logging structured-logging logger-message contract compatibility observability ci</PackageTags>
+    <Description>Detects breaking changes in source-generated .NET structured logging contracts.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\KeelMatrix.LogSchema.Core\KeelMatrix.LogSchema.Core.csproj" />
+    <None Include="README.md" Pack="true" PackagePath="" />
+    <None Include="..\..\icon.png" Pack="true" PackagePath="" Link="icon.png" Condition="Exists('..\..\icon.png')" />
+  </ItemGroup>
+</Project>

@@ -2,36 +2,27 @@
 
 ## Navigation
 
-- `phase0/` contains the non-packable MSBuild/Roslyn feasibility probe.
-- `fixtures/` contains SDK-style projects used by the Phase 0 matrix.
-- `docs/` contains the Phase 0 evidence and decision record.
-- `LogSchema.slnx` is the repository solution.
+- `src/KeelMatrix.LogSchema/` is the packable net8.0 command-line tool.
+- `src/KeelMatrix.LogSchema.Core/` is the non-packable extractor, manifest model/parser, and comparison engine.
+- `tests/KeelMatrix.LogSchema.Tests/` contains unit and contract tests.
+- `phase0/` and `fixtures/` retain the non-shipping semantic feasibility probe and regression fixtures.
+- `COMPATIBILITY-RULES.md` and `MANIFEST.md` are the source of truth for durable product contracts.
 
 ## Commands
 
 ```text
-dotnet restore LogSchema.slnx
+dotnet restore LogSchema.slnx --configfile NuGet.config
 dotnet build LogSchema.slnx -c Release --no-restore
+dotnet test tests/KeelMatrix.LogSchema.Tests/KeelMatrix.LogSchema.Tests.csproj -c Release --no-restore
 pwsh ./build/validate.ps1
 ```
 
-The Phase 0 probe is run directly with a fixture project and an output path. The
-probe is intentionally non-packable and must never become part of the shipping
-tool package.
+The tool uses design-time MSBuild/Roslyn evaluation and never loads target application assemblies. The Phase 0 probe is intentionally retained and must continue to pass its matrix.
 
 ## Invariants
 
-- The Phase 0 probe loads SDK-style projects through MSBuild/Roslyn semantic APIs.
-- The probe never loads or invokes target application assemblies.
-- Canonical output contains no absolute checkout, build, or temporary paths.
-- Unsupported `[LoggerMessage]` declarations are reported explicitly.
-- The repository-root `icon.png` is founder-owned and must not be created or edited
-  by repository tooling.
-- This M1 repository contains no shipping CLI, manifest comparison engine, or
-  package project.
-
-## Scope discipline
-
-Keep fixtures synthetic and bounded. Do not add runtime log inspection, provider
-integrations, generic logging analysis, telemetry, or release automation in M1.
-
+- Shipping output is a deterministic schema-v1 manifest with no absolute machine paths.
+- Unsupported declarations are explicit; duplicate or ambiguous identities are analysis errors.
+- `check` never rewrites a baseline.
+- The root `icon.png` is founder-owned and must not be created or edited by repository tooling.
+- Tests, fixtures, and the Phase 0 probe are non-packable.

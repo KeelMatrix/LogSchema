@@ -1,0 +1,13 @@
+# Dependency rationale
+
+The shipping tool has one runtime dependency graph for semantic project loading and canonical comparison:
+
+- `Microsoft.CodeAnalysis.CSharp.Workspaces` and `Microsoft.CodeAnalysis.Workspaces.MSBuild` provide semantic C# documents and design-time SDK project loading. They are required to discover `LoggerMessageAttribute` declarations without executing target assemblies.
+- `Microsoft.Build.Locator` selects the installed MSBuild instance used by the workspace. It is a project-loading dependency, not a runtime logging provider.
+- `Microsoft.Build.Framework`, `Microsoft.Build`, `Microsoft.Build.Utilities.Core`, `Microsoft.Build.Tasks.Core`, and `Microsoft.NET.StringTools` are private build/runtime support assets required by the MSBuild workspace and are excluded from consumer compile/runtime asset flow where the locator requires it.
+- `Microsoft.Extensions.Logging.Abstractions` supplies the current logging attribute and symbol definitions used by representative projects; LogSchema does not depend on a logging provider or backend.
+- `System.Text.Json` is supplied by the net8.0 framework and is used for the bounded schema-v1 serializer/parser.
+
+The CLI parser is framework code so the public tool does not add a large parser dependency. `Microsoft.NET.Test.Sdk`, `xunit`, and `xunit.runner.visualstudio` are test-only dependencies. No telemetry client, network service, provider SDK, or hosted backend is included.
+
+Versions are centrally pinned in `Directory.Packages.props`. The Phase 0 probe keeps its validated Roslyn 5.9 override; the shipping net8.0 path uses the net8-compatible Roslyn 4.14 line.
