@@ -174,3 +174,25 @@ The container emitted SDK `10.0.401`, a zero-warning/zero-error probe build,
 and the matching SHA-256 shown above. The disposable final container was
 removed after evidence capture.
 
+## Icon path derivation
+
+M1 intentionally has no packable project and therefore produces no package or
+package icon copy. The exact path set required when the shipping tool project
+is added is one file only:
+
+```text
+<repository root>/icon.png
+```
+
+The intended pack configuration for a future `src/KeelMatrix.LogSchema`
+packable project is:
+
+```xml
+<PackageIcon>icon.png</PackageIcon>
+<None Include="..\..\icon.png" Pack="true" PackagePath="" Link="icon.png" />
+```
+
+That item resolves to the repository-root file and embeds it as package-root
+`icon.png`; no project-local icon path is required. The root `icon.png` is
+absent in M1 as expected. Its bytes, placement, commit, and push remain
+founder-owned and are not performed by repository tooling.
