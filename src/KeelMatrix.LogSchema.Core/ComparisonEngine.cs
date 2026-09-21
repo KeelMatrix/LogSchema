@@ -37,7 +37,7 @@ internal enum SeverityGate
 
 internal static class ComparisonEngine
 {
-    internal static ComparisonReport Compare(ManifestDocument oldManifest, ManifestDocument newManifest, SeverityGate gate, IReadOnlySet<string> acceptedCodes)
+    internal static ComparisonReport Compare(ManifestDocument oldManifest, ManifestDocument newManifest, SeverityGate gate, IReadOnlySet<string> acceptedCodes, bool rejectEmptyEventSets = false)
     {
         var oldEvents = oldManifest.Events.ToDictionary(EventKey, StringComparer.Ordinal);
         var newEvents = newManifest.Events.ToDictionary(EventKey, StringComparer.Ordinal);
@@ -68,8 +68,17 @@ internal static class ComparisonEngine
             .ThenBy(finding => finding.Code, StringComparer.Ordinal)
             .ThenBy(finding => finding.Field, StringComparer.Ordinal)
             .ToArray();
-        var analysisErrors = newManifest.AnalysisIssues.Where(issue => string.Equals(issue.Severity, "error", StringComparison.OrdinalIgnoreCase)).Select(issue => issue.Code + ": " + issue.Message).Order(StringComparer.Ordinal).ToArray();
-        return new ComparisonReport(normalized, analysisErrors);
+        var analysisErrors = newManifest.AnalysisIssues
+            .Where(issue => string.Equals(issue.Severity, "error", StringComparison.OrdinalIgnoreCase))
+            .Select(issue => issue.Code + ": " + issue.Message)
+            .ToList();
+        if (rejectEmptyEventSets && oldManifest.Events.Count == 0)
+        {
+            analysisErrors.Add(LogSchemaExtractor.EmptyEventsIssueCode + ": " + LogSchemaExtractor.EmptyBaselineEventsIssueMessage);
+        }
+
+        var distinctAnalysisErrors = analysisErrors.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
+        return new ComparisonReport(normalized, distinctAnalysisErrors);
     }
 
     private static void CompareEvent(EventContract oldEvent, EventContract newEvent, List<CompatibilityFinding> findings)
@@ -89,9 +98,9 @@ internal static class ComparisonEngine
 
         var oldNames = oldEvent.Placeholders.Select(p => p.Name).ToArray();
         var newNames = newEvent.Placeholders.Select(p => p.Name).ToArray();
-        var oldSet = oldNames.ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var newSet = newNames.ToHashSet(StringComparer.OrdinalIgnoreCase);
-        if (oldNames.Length == newNames.Length && oldSet.SetEquals(newSet) && !oldNames.SequenceEqual(newNames, StringComparer.OrdinalIgnoreCase))
+        var oldSet = oldNames.ToHashSet(StringComparer.Ordinal);
+        var newSet = newNames.ToHashSet(StringComparer.Ordinal);
+        if (oldNames.Length == newNames.Length && oldSet.SetEquals(newSet) && !oldNames.SequenceEqual(newNames, StringComparer.Ordinal))
         {
             findings.Add(Find("KMLOG103", FindingSeverity.Breaking, newEvent, "placeholders", string.Join(", ", oldNames), string.Join(", ", newNames), $"{Display(newEvent)} changed structured placeholder order."));
         }
@@ -116,7 +125,7 @@ internal static class ComparisonEngine
             }
         }
 
-        if (!string.Equals(oldEvent.Message, newEvent.Message, StringComparison.Ordinal) && oldNames.SequenceEqual(newNames, StringComparer.OrdinalIgnoreCase))
+        if (!string.Equals(oldEvent.Message, newEvent.Message, StringComparison.Ordinal) && oldNames.SequenceEqual(newNames, StringComparer.Ordinal))
         {
             findings.Add(Find("KMLOG301", FindingSeverity.Info, newEvent, "message", oldEvent.Message, newEvent.Message, $"{Display(newEvent)} changed message template prose."));
         }

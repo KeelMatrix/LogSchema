@@ -59,6 +59,8 @@ The complete rule matrix and stable diagnostic codes are maintained in [COMPATIB
 | LogLevel changed | WARNING | no; use `--severity warning` |
 | Template prose changed with the same structured shape | INFO | no |
 
+Structured identity fields are compared with exact ordinal semantics: case-only changes to placeholder names are structured renames (`KMLOG102`), while `KMLOG301` is reserved for prose changes whose structured shape is unchanged under ordinal comparison.
+
 Intentional changes can be accepted explicitly with repeated `--accept <diagnostic-code>`. Acceptance affects only the current comparison; it never rewrites a baseline.
 
 ## Capture, check, and update workflow
@@ -80,7 +82,7 @@ Exit codes are:
 | 0 | Analysis succeeded and no finding at or above the selected gate exists. |
 | 1 | Analysis succeeded and a gated finding exists. |
 | 2 | Invocation or configuration is invalid. |
-| 3 | Project loading, manifest parsing, or analysis failed. |
+| 3 | Project loading, manifest parsing, or analysis failed, including zero supported events. |
 
 A project-load failure is always code 3 and cannot produce a clean result. JSON output separates `toolErrors`, `analysisErrors`, and compatibility `findings`:
 
@@ -116,7 +118,7 @@ See the [security policy](SECURITY.md) and [dependency rationale](docs/DEPENDENC
 ## Troubleshooting
 
 - **Project-load failure:** confirm the SDK is installed, restore the project with its normal package sources, and pass the intended target framework with `--tfm` for a multi-targeted project. The command returns 3 on failure.
-- **Zero events:** confirm the project contains supported partial `[LoggerMessage]` declarations. Manual `ILogger.Log*` calls are outside v1.
+- **Zero events (`KMLOGP006`):** `capture` and `check` return 3 when no supported `[LoggerMessage]` declarations are discovered, and `capture` writes no baseline. Check that the project genuinely contains declarations, that their shape is supported, and that the intended target framework is selected with `--tfm`. Manual `ILogger.Log*` calls are outside v1. A zero-event baseline is also rejected by `check`; `diff` is unaffected.
 - **Unsupported declaration:** inspect the manifest `unsupported` list and its reason. The declaration was reported rather than discarded.
 - **Invalid manifest:** regenerate it with `capture`. Malformed JSON, absolute source paths, oversized/deep input, and future schema versions are rejected with code 3.
 - **Duplicate or ambiguous identity:** correct duplicate partial declarations or project identities. The manifest records an analysis error and comparison cannot report clean.
@@ -133,6 +135,8 @@ pwsh ./build/validate.ps1
 ```
 
 The Phase 0 semantic probe and fixtures remain in `phase0/` and `fixtures/` as regression evidence. The shipping tool is in `src/KeelMatrix.LogSchema/`; its project-local README is the README input for the later package step.
+
+Repository text sources use canonical LF line endings so a normal Windows clone with `core.autocrlf=true` remains format-clean. `dotnet pack` uses a fixed deterministic ZIP timestamp; `build/validate.ps1` packs twice and requires the `.nupkg`/`.snupkg` artifact set to be byte-identical.
 
 ## License
 

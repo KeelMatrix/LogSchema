@@ -3,6 +3,7 @@ $ErrorActionPreference = 'Stop'
 $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $artifactRoot = Join-Path $repositoryRoot 'artifacts/validation'
 $packageOutput = Join-Path $artifactRoot 'package'
+$repeatPackageOutput = Join-Path $artifactRoot 'package-repeat'
 $smokeRoot = Join-Path $artifactRoot 'consumer-smoke'
 $toolProject = Join-Path $repositoryRoot 'src/KeelMatrix.LogSchema/KeelMatrix.LogSchema.csproj'
 $coreProject = Join-Path $repositoryRoot 'src/KeelMatrix.LogSchema.Core/KeelMatrix.LogSchema.Core.csproj'
@@ -211,6 +212,24 @@ Invoke-Timed 'Vulnerability audit' {
     dotnet list $toolProject package --vulnerable --include-transitive --framework net8.0 --no-restore
     Assert-That ($LASTEXITCODE -eq 0) 'tool dependency vulnerability audit must pass'
 }
+Invoke-Timed 'Line-ending contract' {
+    $trackedFiles = @(git -C $repositoryRoot ls-files)
+    Assert-That ($LASTEXITCODE -eq 0) 'git must enumerate tracked files for the line-ending check'
+    foreach ($relativePath in $trackedFiles) {
+        if ($relativePath -eq 'icon.png') {
+            continue
+        }
+
+        $bytes = [IO.File]::ReadAllBytes((Join-Path $repositoryRoot $relativePath))
+        Assert-That ([Array]::IndexOf($bytes, [byte]13) -lt 0) "tracked text file contains CRLF: $relativePath"
+        if ($bytes.Length -gt 0) {
+            Assert-That ($bytes[$bytes.Length - 1] -eq 10) "tracked text file must end with LF: $relativePath"
+        }
+    }
+
+    $validateAttributes = (& git -C $repositoryRoot check-attr eol -- build/validate.ps1 | Out-String).Trim()
+    Assert-That ($validateAttributes -match 'build/validate\.ps1: eol: lf') 'repository attributes must require LF for PowerShell validation scripts'
+}
 Invoke-Timed 'Format and analyzer validation' { dotnet format $solution --no-restore --verify-no-changes --verbosity minimal }
 Invoke-Timed 'Release build' { dotnet build $solution -c Release --no-restore --nologo }
 Invoke-Timed 'Unit and contract tests' { dotnet test (Join-Path $repositoryRoot 'tests/KeelMatrix.LogSchema.Tests/KeelMatrix.LogSchema.Tests.csproj') -c Release --no-build --no-restore --nologo }
@@ -243,6 +262,44 @@ Invoke-Timed 'CLI failure safety' {
     $global:LASTEXITCODE = 0
 }
 
+Invoke-Timed 'Zero-event analysis safety' {
+    $zeroRoot = Join-Path $artifactRoot 'zero-events'
+    New-Item -ItemType Directory -Force -Path $zeroRoot | Out-Null
+    $zeroProject = Join-Path $zeroRoot 'ZeroEvents.csproj'
+    @"
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+  </PropertyGroup>
+</Project>
+"@ | Set-Content -LiteralPath $zeroProject -Encoding utf8NoBOM
+    'public sealed class Empty { }' | Set-Content -LiteralPath (Join-Path $zeroRoot 'Empty.cs') -Encoding utf8NoBOM
+    $zeroBaseline = Join-Path $zeroRoot 'logschema.json'
+    $zeroOutput = (& dotnet $tool capture $zeroProject --output $zeroBaseline --no-telemetry 2>&1 | Out-String)
+    Assert-That ($LASTEXITCODE -eq 3) 'zero-event capture must return exit 3'
+    Assert-That ($zeroOutput -match 'KMLOGP006') 'zero-event capture must report KMLOGP006'
+    Assert-That (-not (Test-Path -LiteralPath $zeroBaseline)) 'zero-event capture must not write a baseline'
+
+    @"
+{
+  "schemaVersion": 1,
+  "projects": [],
+  "events": [],
+  "unsupported": [],
+  "analysisIssues": [],
+  "compilationDiagnosticKinds": [],
+  "workspaceDiagnosticKinds": []
+}
+"@ | Set-Content -LiteralPath $zeroBaseline -Encoding utf8NoBOM
+    $baselineOutput = (& dotnet $tool check $fixtureProject --tfm net8.0 --baseline $zeroBaseline --no-telemetry 2>&1 | Out-String)
+    Assert-That ($LASTEXITCODE -eq 3) 'zero-event baseline check must return exit 3'
+    Assert-That ($baselineOutput -match 'KMLOGP006') 'zero-event baseline check must report KMLOGP006'
+    $diffOutput = (& dotnet $tool diff $zeroBaseline $zeroBaseline --no-telemetry 2>&1 | Out-String)
+    Assert-That ($LASTEXITCODE -eq 0) 'diff of zero-event manifests must remain a pure manifest comparison'
+    Assert-That ($diffOutput -notmatch 'KMLOGP006') 'diff must not apply the zero-event check gate'
+    $global:LASTEXITCODE = 0
+}
+
 $properties = Get-ProjectProperties -Project $toolProject
 $packageId = [string]$properties.Properties.PackageId
 $packageVersion = [string]$properties.Properties.PackageVersion
@@ -251,18 +308,27 @@ $includeSymbols = [string]$properties.Properties.IncludeSymbols -eq 'true'
 $expectedSymbolsName = "$packageId.$packageVersion.snupkg"
 
 Invoke-Timed 'Pack and inspect' {
-    New-Item -ItemType Directory -Force -Path $packageOutput | Out-Null
+    New-Item -ItemType Directory -Force -Path $packageOutput, $repeatPackageOutput | Out-Null
     dotnet pack $toolProject -c Release --no-build --no-restore --nologo -o $packageOutput
     Assert-That ($LASTEXITCODE -eq 0) 'the Release package must build'
+    dotnet pack $toolProject -c Release --no-build --no-restore --nologo -o $repeatPackageOutput
+    Assert-That ($LASTEXITCODE -eq 0) 'the repeated Release package must build'
 
     $artifactNames = @(Get-ChildItem -LiteralPath $packageOutput -File | Select-Object -ExpandProperty Name | Sort-Object)
+    $repeatArtifactNames = @(Get-ChildItem -LiteralPath $repeatPackageOutput -File | Select-Object -ExpandProperty Name | Sort-Object)
     $expectedNames = @($expectedPackageName)
     if ($includeSymbols) { $expectedNames += $expectedSymbolsName }
     Assert-That ((Compare-Object -ReferenceObject $expectedNames -DifferenceObject $artifactNames).Count -eq 0) "package artifacts must be exactly: $($expectedNames -join ', ')"
+    Assert-That ((Compare-Object -ReferenceObject $expectedNames -DifferenceObject $repeatArtifactNames).Count -eq 0) "repeated package artifacts must be exactly: $($expectedNames -join ', ')"
     foreach ($artifactName in $artifactNames) {
         $artifactPath = Join-Path $packageOutput $artifactName
+        $repeatArtifactPath = Join-Path $repeatPackageOutput $artifactName
         $artifactHash = (Get-FileHash -LiteralPath $artifactPath -Algorithm SHA256).Hash.ToUpperInvariant()
-        Write-Host "Artifact: $artifactName bytes=$((Get-Item -LiteralPath $artifactPath).Length) SHA256=$artifactHash"
+        $repeatArtifactHash = (Get-FileHash -LiteralPath $repeatArtifactPath -Algorithm SHA256).Hash.ToUpperInvariant()
+        $artifactBytes = (Get-Item -LiteralPath $artifactPath).Length
+        $repeatArtifactBytes = (Get-Item -LiteralPath $repeatArtifactPath).Length
+        Write-Host "Artifact: $artifactName A_BYTES=$artifactBytes A_SHA256=$artifactHash B_BYTES=$repeatArtifactBytes B_SHA256=$repeatArtifactHash"
+        Assert-That ($artifactBytes -eq $repeatArtifactBytes -and $artifactHash -eq $repeatArtifactHash) "$artifactName must be byte-identical across consecutive packs"
     }
     $packagePath = Join-Path $packageOutput $expectedPackageName
     Assert-That (Test-Path -LiteralPath $packagePath) "missing $expectedPackageName"

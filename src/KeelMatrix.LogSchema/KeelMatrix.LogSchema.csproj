@@ -18,6 +18,8 @@
     <PublishRepositoryUrl>true</PublishRepositoryUrl>
     <IncludeSymbols>true</IncludeSymbols>
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <!-- NuGet uses this Unix timestamp for deterministic ZIP entry metadata. -->
+    <DeterministicTimestamp>315532800</DeterministicTimestamp>
     <PackageTags>dotnet-tool logging structured-logging logger-message contract compatibility observability ci</PackageTags>
     <Description>Detects breaking changes in source-generated .NET structured logging contracts. Captures and diffs LoggerMessage event IDs, names, levels, templates, and structured properties locally and in CI.</Description>
   </PropertyGroup>

@@ -74,6 +74,21 @@ public sealed class ComparisonEngineTests
     }
 
     [Fact]
+    public void CaseOnlyPlaceholderRenameIsBreakingAtDefaultGate()
+    {
+        var report = Compare(
+            Manifest(Event("Old", 1, "Old", "Information", "old {CustomerName}", "CustomerName")),
+            Manifest(Event("Old", 1, "Old", "Information", "old {customername}", "customername")),
+            SeverityGate.Breaking);
+
+        var finding = Assert.Single(report.Findings);
+        Assert.Equal("KMLOG102", finding.Code);
+        Assert.Equal("CustomerName", finding.OldValue);
+        Assert.Equal("customername", finding.NewValue);
+        Assert.True(report.HasGatedFindings(SeverityGate.Breaking));
+    }
+
+    [Fact]
     public void AcceptedCodeDoesNotGateAndDoesNotRewriteManifest()
     {
         var oldManifest = Manifest(Event("Old", 1, "Old", "Information", "old {Value}", "Value"));

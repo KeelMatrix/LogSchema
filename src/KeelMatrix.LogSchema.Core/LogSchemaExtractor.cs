@@ -10,6 +10,9 @@ namespace KeelMatrix.LogSchema;
 internal sealed class LogSchemaExtractor
 {
     private const string LoggerMessageAttributeName = "Microsoft.Extensions.Logging.LoggerMessageAttribute";
+    internal const string EmptyEventsIssueCode = "KMLOGP006";
+    internal const string EmptyEventsIssueMessage = "No supported [LoggerMessage] declarations were found. The project may genuinely have no [LoggerMessage] declarations, may use an unsupported declaration shape, or may target the wrong framework; for a multi-targeted project, try --tfm.";
+    internal const string EmptyBaselineEventsIssueMessage = "The baseline manifest contains zero events. No supported [LoggerMessage] declarations may have been captured because the project genuinely has none, uses an unsupported declaration shape, or targets the wrong framework; for a multi-targeted project, try --tfm.";
 
     internal static async Task<ManifestDocument> ExtractAsync(string inputPath, string? targetFramework, CancellationToken cancellationToken)
     {
@@ -114,6 +117,17 @@ internal sealed class LogSchemaExtractor
                 "KMLOGP004",
                 "error",
                 "MSBuild reported a workspace failure while loading the project graph.",
+                string.Empty,
+                Array.Empty<SourceLocation>()));
+        }
+
+        if (allEvents.Count == 0)
+        {
+            allIssues.Add(new AnalysisIssue(
+                allProjects.FirstOrDefault()?.Key ?? "workspace",
+                EmptyEventsIssueCode,
+                "error",
+                EmptyEventsIssueMessage,
                 string.Empty,
                 Array.Empty<SourceLocation>()));
         }

@@ -62,9 +62,13 @@ internal sealed class CommandRunner
     private static async Task<int> CaptureAsync(ParsedArguments parsed, TextWriter stdout, TextWriter stderr, CancellationToken cancellationToken)
     {
         var manifest = await LogSchemaExtractor.ExtractAsync(parsed.Positionals[0], parsed.TargetFramework, cancellationToken);
-        await ManifestJson.WriteAsync(manifest, parsed.OutputPath!, cancellationToken);
         var errors = manifest.AnalysisIssues.Where(issue => string.Equals(issue.Severity, "error", StringComparison.OrdinalIgnoreCase)).Select(issue => issue.Code + ": " + issue.Message).Order(StringComparer.Ordinal).ToArray();
-        var envelope = new CommandEnvelope(Array.Empty<string>(), errors, Array.Empty<CompatibilityFinding>(), Path.GetFileName(parsed.OutputPath), manifest.Events.Count, manifest.Unsupported.Count);
+        if (errors.Length == 0)
+        {
+            await ManifestJson.WriteAsync(manifest, parsed.OutputPath!, cancellationToken);
+        }
+
+        var envelope = new CommandEnvelope(Array.Empty<string>(), errors, Array.Empty<CompatibilityFinding>(), errors.Length == 0 ? Path.GetFileName(parsed.OutputPath) : null, manifest.Events.Count, manifest.Unsupported.Count);
         await WriteEnvelopeAsync(parsed, envelope, stdout, stderr, errors.Length > 0 ? 3 : 0);
         return errors.Length > 0 ? 3 : 0;
     }
@@ -73,7 +77,7 @@ internal sealed class CommandRunner
     {
         var current = await LogSchemaExtractor.ExtractAsync(parsed.Positionals[0], parsed.TargetFramework, cancellationToken);
         var baseline = await ManifestJson.ReadAsync(parsed.BaselinePath!, cancellationToken);
-        var report = ComparisonEngine.Compare(baseline, current, parsed.Gate, parsed.AcceptedCodes);
+        var report = ComparisonEngine.Compare(baseline, current, parsed.Gate, parsed.AcceptedCodes, rejectEmptyEventSets: true);
         var envelope = new CommandEnvelope(Array.Empty<string>(), report.AnalysisErrors, report.Findings, null, current.Events.Count, current.Unsupported.Count);
         var exitCode = report.AnalysisErrors.Count > 0 ? 3 : report.HasGatedFindings(parsed.Gate) ? 1 : 0;
         await WriteEnvelopeAsync(parsed, envelope, stdout, stderr, exitCode);
@@ -266,6 +270,14 @@ Exit codes:
   0 analysis succeeded and no gated findings were found
   1 analysis succeeded and gated findings were found
   2 invalid invocation or configuration
-  3 project-load or analysis failure
+  3 project-load or analysis failure, including zero supported events
+
+Compatibility summary:
+  BREAKING EventId/EventName changes and placeholder removal, rename, or order changes (default gate).
+  WARNING  LogLevel changes (use --severity warning to gate).
+  INFO     Event/placeholder additions and prose-only template changes with unchanged structured shape.
+  Structured identity fields use exact ordinal comparison; case-only placeholder renames are KMLOG102.
+  KMLOGP006 means no supported [LoggerMessage] declarations were found; capture/check return 3 and
+  capture does not write a baseline. diff remains a pure manifest comparison.
 """;
 }

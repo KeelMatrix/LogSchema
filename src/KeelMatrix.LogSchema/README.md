@@ -24,6 +24,21 @@ logschema diff old.json new.json
 
 The log contract is the EventId, EventName, level, template, and ordered structured placeholder shape of a supported partial void method using `LoggerMessageAttribute`. V1 reads C# projects through design-time MSBuild/Roslyn, does not execute target code, and reports unsupported declarations explicitly.
 
+## Compatibility summary
+
+The complete matrix is in the linked [compatibility rules](https://github.com/KeelMatrix/LogSchema/blob/main/COMPATIBILITY-RULES.md). The v1 default `breaking` gate treats these changes as follows:
+
+| Change | Severity | Default gate |
+| --- | --- | --- |
+| Event removal or method identity change | BREAKING | yes |
+| EventId/EventName change | BREAKING | yes |
+| Structured placeholder removal, rename, or order change | BREAKING | yes |
+| Event or structured placeholder addition | INFO | no |
+| LogLevel change | WARNING | no; use `--severity warning` |
+| Template prose change with unchanged structured shape | INFO | no |
+
+Structured identity fields use exact ordinal, case-sensitive comparison. A case-only placeholder rename is `KMLOG102`; `KMLOG301` is only a true prose-only change with unchanged structured shape. If no supported `[LoggerMessage]` declarations are found, `KMLOGP006` is an analysis error: `capture` and `check` return 3, `capture` writes no baseline, and `check` rejects a zero-event baseline. `diff` remains a pure manifest comparison.
+
 See the repository [compatibility rules](https://github.com/KeelMatrix/LogSchema/blob/main/COMPATIBILITY-RULES.md) and [manifest schema](https://github.com/KeelMatrix/LogSchema/blob/main/MANIFEST.md) for the complete stable-code and schema contracts.
 
 Options: `--format text|json`, `--severity breaking|warning|all`, `--accept <code>`, `--no-telemetry`, and `--tfm <target-framework>`. Exit codes are 0 clean, 1 gated findings, 2 invalid invocation/configuration, and 3 project-load or analysis failure. V1 emits no telemetry; `--no-telemetry` is reserved and accepted.

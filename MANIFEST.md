@@ -7,7 +7,7 @@ The default file is `logschema.json`. The top-level `schemaVersion` is an intege
 - `projects`: project identity records with a stable key, project name, assembly name, and selected target framework.
 - `events`: supported event records with project key, full method identity, containing type, method, generic arity, parameter ref kinds, EventId, EventName, level, message template, ordered placeholders, special parameter forms, and project-relative source provenance.
 - `unsupported`: every discovered but unsupported declaration, including normalized declaration text, identity, source provenance, and reason.
-- `analysisIssues`: explicit warnings/errors such as ambiguous identity, unpaired generated declarations, workspace failures, or an untrustworthy compilation.
+- `analysisIssues`: explicit warnings/errors such as ambiguous identity, unpaired generated declarations, workspace failures, an untrustworthy compilation, or `KMLOGP006` when no supported `[LoggerMessage]` declarations were found.
 - `compilationDiagnosticKinds` and `workspaceDiagnosticKinds`: sorted diagnostic categories without source paths or raw machine-specific messages.
 
 ## Canonicalization
@@ -19,6 +19,8 @@ The serializer normalizes line endings in declaration text and JSON output. Sour
 ## Parsing safety and compatibility
 
 The parser accepts at most 4 MiB and JSON nesting depth 32. It rejects malformed JSON, comments, trailing commas, incomplete required fields, non-canonical source paths, oversized record arrays, and any schema version other than 1. A failed parse is an analysis failure and returns exit code 3. Baselines are never changed by `check` or `diff`.
+
+An analysis that discovers zero supported events reports `KMLOGP006` and returns exit code 3. `capture` does not write a zero-event baseline. `check` rejects both a zero-event current analysis and a baseline manifest with zero events; `diff` remains a pure comparison of the two manifests and does not apply this project-analysis rule.
 
 ## Trust boundary
 
