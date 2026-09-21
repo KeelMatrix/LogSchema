@@ -15,7 +15,8 @@
     <PackageProjectUrl>https://github.com/KeelMatrix/LogSchema</PackageProjectUrl>
     <RepositoryUrl>https://github.com/KeelMatrix/LogSchema</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
-    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <!-- Keep package bytes independent of checkout branch metadata and clone-origin SourceLink discovery. -->
+    <PublishRepositoryUrl>false</PublishRepositoryUrl>
     <IncludeSymbols>true</IncludeSymbols>
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
     <!-- NuGet uses this Unix timestamp for deterministic ZIP entry metadata. -->

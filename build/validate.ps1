@@ -416,6 +416,11 @@ Invoke-Timed 'Pack and inspect' {
     Write-Host 'Package content safety: no tests, fixtures, Phase 0, benchmark, environment, source-only, internal-wording, or absolute-path entries found.'
 }
 
+Invoke-Timed 'Attached/detached package reproducibility' {
+    & pwsh -NoProfile -NonInteractive -File (Join-Path $repositoryRoot 'build/Test-PackageReproducibility.ps1') -RepositoryRoot $repositoryRoot
+    Assert-That ($LASTEXITCODE -eq 0) 'attached/detached package reproducibility regression must pass'
+}
+
 Invoke-Timed 'Isolated consumer restore and tool install' {
     $feed = Join-Path $smokeRoot 'feed'
     $consumerRoot = Join-Path $smokeRoot 'consumer'

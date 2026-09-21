@@ -136,7 +136,7 @@ pwsh ./build/validate.ps1
 
 The Phase 0 semantic probe and fixtures remain in `phase0/` and `fixtures/` as regression evidence. The shipping tool is in `src/KeelMatrix.LogSchema/`; its project-local README is the README input for the later package step.
 
-Repository text sources use canonical LF line endings so a normal Windows clone with `core.autocrlf=true` remains format-clean. `dotnet pack` uses a fixed deterministic ZIP timestamp; `build/validate.ps1` packs twice and requires the `.nupkg`/`.snupkg` artifact set to be byte-identical.
+Repository text sources use canonical LF line endings so a normal Windows clone with `core.autocrlf=true` remains format-clean. `dotnet pack` uses a fixed deterministic ZIP timestamp and excludes checkout-derived branch and SourceLink metadata; `build/validate.ps1` requires `.nupkg`/`.snupkg` bytes to remain identical across attached, detached, alternate-origin, and alternate-directory checkouts.
 
 ## License
 
