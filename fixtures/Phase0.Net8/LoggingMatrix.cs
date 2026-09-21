@@ -32,6 +32,27 @@ public static partial class LoggingMatrix
     [LoggerMessage(EventId = 1007, Level = LogLevel.Trace, Message = "Escaped {{literal}} and {Value:000}")]
     public static partial void FormatSpecifier(ILogger logger, int Value);
 
+    [LoggerMessage(EventId = 1008, EventName = "Constant" + "Expression", Level = LogLevel.Information, Message = "Constant expression {Value}")]
+    public static partial void ConstantExpressionEventName(ILogger logger, int value);
+
+    [LoggerMessage(EventId = 1009, Level = LogLevel.Information, Message = "Skip enabled check {Value}", SkipEnabledCheck = true)]
+    public static partial void SkipEnabledCheck(ILogger logger, int value);
+
+    [LoggerMessage(eventId: 1010, level: LogLevel.Information, message: "All named arguments {Value}", EventName = "AllNamedArguments")]
+    public static partial void AllNamedArguments(ILogger logger, int value);
+
+    [LoggerMessage(EventId = 1011, Level = LogLevel.Information, Message = "Duplicate event one {Value}")]
+    public static partial void DuplicateEventIdOne(ILogger logger, int value);
+
+    [LoggerMessage(EventId = 1011, Level = LogLevel.Warning, Message = "Duplicate event two {Value}")]
+    public static partial void DuplicateEventIdTwo(ILogger logger, int value);
+
+    [LoggerMessage(EventId = 1012, Level = LogLevel.Information, Message = "Generic event {Value}")]
+    public static partial void GenericEvent<T>(ILogger logger, T value);
+
+    [LoggerMessage(EventId = 1013, Level = LogLevel.Information, Message = "No parameters")]
+    public static partial void NoParameters();
+
     [LoggerMessage(EventId = 1099, Level = LogLevel.Warning, Message = "This declaration is not a supported generated method")]
     public static void NonPartialWithExplicitValues(ILogger logger)
     {
@@ -41,4 +62,19 @@ public static partial class LoggingMatrix
     {
         throw new InvalidOperationException("The fixture must never execute.");
     }
+}
+
+public partial class PartialOuter
+{
+    public static partial class NestedLogging
+    {
+        [LoggerMessage(EventId = 1014, Level = LogLevel.Information, Message = "Nested event {Value}")]
+        public static partial void NestedEvent(ILogger logger, string value);
+    }
+}
+
+public partial class InstanceLoggingMatrix
+{
+    [LoggerMessage(EventId = 1015, Level = LogLevel.Information, Message = "Instance event {Value}")]
+    public partial void InstanceEvent(ILogger logger, string value);
 }

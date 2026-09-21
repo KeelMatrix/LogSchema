@@ -100,6 +100,8 @@ internal sealed class Extractor
     private readonly List<UnsupportedDeclaration> unsupported = [];
     private readonly List<GeneratedImplementationReplica> generatedImplementationReplicas = [];
     private readonly HashSet<SyntaxTree> scannedTrees = [];
+    private readonly Dictionary<string, List<SourceLocation>> projectSourceDeclarations = new(StringComparer.Ordinal);
+    private readonly HashSet<string> pairedGeneratedDeclarations = new(StringComparer.Ordinal);
 
     internal Extractor(Project project, Compilation compilation)
     {
@@ -116,7 +118,7 @@ internal sealed class Extractor
             if (root is not null && model is not null)
             {
                 scannedTrees.Add(root.SyntaxTree);
-                Scan(root, model, document.Name);
+                Scan(root, model, Path.GetFileName(document.FilePath ?? document.Name) ?? document.Name, isProjectSource: true);
             }
         }
 
@@ -127,7 +129,7 @@ internal sealed class Extractor
                 continue;
             }
 
-            Scan(tree.GetRoot(), compilation.GetSemanticModel(tree), Path.GetFileName(tree.FilePath) ?? "generated.cs");
+            Scan(tree.GetRoot(), compilation.GetSemanticModel(tree), Path.GetFileName(tree.FilePath) ?? "generated.cs", isProjectSource: false);
         }
 
         var diagnosticIds = compilation.GetDiagnostics()
@@ -155,7 +157,7 @@ internal sealed class Extractor
                 .ToArray());
     }
 
-    private void Scan(SyntaxNode root, SemanticModel model, string documentName)
+    private void Scan(SyntaxNode root, SemanticModel model, string documentName, bool isProjectSource)
     {
         foreach (var methodSyntax in root.DescendantNodes().OfType<MethodDeclarationSyntax>())
         {
@@ -171,14 +173,37 @@ internal sealed class Extractor
             var source = new SourceLocation(
                 File: Path.GetFileName(documentName),
                 Line: methodSyntax.GetLocation().GetLineSpan().StartLinePosition.Line + 1,
-                Kind: documentName.EndsWith(".g.cs", StringComparison.OrdinalIgnoreCase) ? "generated" : "source");
+                Kind: isProjectSource ? "source" : "generated");
 
-            if (source.Kind == "generated" && methodSymbol.GetAttributes().Any(IsGeneratedImplementation))
+            var declarationKey = GetDeclarationKey(methodSymbol);
+            if (isProjectSource)
             {
-                generatedImplementationReplicas.Add(new GeneratedImplementationReplica(
-                    Source: source with { Line = 0 },
+                if (!projectSourceDeclarations.TryGetValue(declarationKey, out var sourceDeclarations))
+                {
+                    sourceDeclarations = [];
+                    projectSourceDeclarations.Add(declarationKey, sourceDeclarations);
+                }
+
+                sourceDeclarations.Add(source);
+            }
+            else if (IsGeneratedImplementation(methodSymbol))
+            {
+                if (projectSourceDeclarations.TryGetValue(declarationKey, out var sourceDeclarations) &&
+                    sourceDeclarations.Count == 1 &&
+                    pairedGeneratedDeclarations.Add(declarationKey))
+                {
+                    generatedImplementationReplicas.Add(new GeneratedImplementationReplica(
+                        Source: source with { Line = 0 },
+                        Declaration: NormalizeDeclaration(methodSyntax.ToString()),
+                        PairedSource: sourceDeclarations[0],
+                        Reason: "compiler-generated LoggerMessage implementation replica paired one-to-one with the project-source declaration"));
+                    continue;
+                }
+
+                unsupported.Add(new UnsupportedDeclaration(
+                    Source: source,
                     Declaration: NormalizeDeclaration(methodSyntax.ToString()),
-                    Reason: "compiler-generated LoggerMessage implementation replica; the source declaration is reported separately"));
+                    Reason: "generated LoggerMessage declaration is not paired one-to-one with a project-source declaration"));
                 continue;
             }
 
@@ -194,6 +219,11 @@ internal sealed class Extractor
             events.Add(contract!);
         }
     }
+
+    private static string GetDeclarationKey(IMethodSymbol method) =>
+        method.ContainingType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) + "." +
+        method.Name + "(" +
+        string.Join(",", method.Parameters.Select(parameter => parameter.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat))) + ")";
 
     private static bool TryExtract(
         MethodDeclarationSyntax syntax,
@@ -400,8 +430,8 @@ internal sealed class Extractor
     private static bool IsLogger(ITypeSymbol type) =>
         type.Name == "ILogger" && type.ContainingNamespace.ToDisplayString() == "Microsoft.Extensions.Logging";
 
-    private static bool IsGeneratedImplementation(AttributeData attribute) =>
-        attribute.AttributeClass?.ToDisplayString() == "System.CodeDom.Compiler.GeneratedCodeAttribute";
+    private static bool IsGeneratedImplementation(IMethodSymbol method) =>
+        method.GetAttributes().Any(attribute => attribute.AttributeClass?.ToDisplayString() == "System.CodeDom.Compiler.GeneratedCodeAttribute");
 
     private static bool IsLogLevel(ITypeSymbol type) =>
         type.Name == "LogLevel" && type.ContainingNamespace.ToDisplayString() == "Microsoft.Extensions.Logging";
@@ -459,6 +489,7 @@ internal sealed record UnsupportedDeclaration(
 internal sealed record GeneratedImplementationReplica(
     [property: JsonPropertyName("source")] SourceLocation Source,
     [property: JsonPropertyName("declaration")] string Declaration,
+    [property: JsonPropertyName("pairedSource")] SourceLocation PairedSource,
     [property: JsonPropertyName("reason")] string Reason);
 
 internal sealed record SourceLocation(

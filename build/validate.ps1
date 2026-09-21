@@ -12,10 +12,11 @@ function Invoke-Timed {
 
     $timer = [System.Diagnostics.Stopwatch]::StartNew()
     & $Action
+    $actionExitCode = $LASTEXITCODE
     $timer.Stop()
     Write-Host ("{0}: {1:N2}s" -f $Label, $timer.Elapsed.TotalSeconds)
-    if ($LASTEXITCODE -ne 0) {
-        throw "$Label failed with exit code $LASTEXITCODE"
+    if ($actionExitCode -ne 0) {
+        throw "$Label failed with exit code $actionExitCode"
     }
 }
 
