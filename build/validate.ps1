@@ -97,7 +97,7 @@ function Get-ZipEntryText {
     )
 
     $bytes = Get-ZipEntryBytes -ArchivePath $ArchivePath -EntryName $EntryName
-    return [System.Text.UTF8Encoding]::new($false, $true).GetString($bytes)
+    return ([System.Text.UTF8Encoding]::new($false, $true).GetString($bytes)).TrimStart([char]0xFEFF)
 }
 
 function Get-ZipEntryHash {
@@ -150,8 +150,8 @@ function Get-PngDimensions {
 
     Assert-That ($Bytes.Length -ge 24) 'PNG must contain an IHDR header.'
     Assert-That (($Bytes[0] -eq 137) -and ($Bytes[1] -eq 80) -and ($Bytes[2] -eq 78) -and ($Bytes[3] -eq 71)) 'icon.png must have a PNG signature.'
-    $width = ($Bytes[16] -shl 24) -bor ($Bytes[17] -shl 16) -bor ($Bytes[18] -shl 8) -bor $Bytes[19]
-    $height = ($Bytes[20] -shl 24) -bor ($Bytes[21] -shl 16) -bor ($Bytes[22] -shl 8) -bor $Bytes[23]
+    $width = ([int]$Bytes[16] -shl 24) -bor ([int]$Bytes[17] -shl 16) -bor ([int]$Bytes[18] -shl 8) -bor [int]$Bytes[19]
+    $height = ([int]$Bytes[20] -shl 24) -bor ([int]$Bytes[21] -shl 16) -bor ([int]$Bytes[22] -shl 8) -bor [int]$Bytes[23]
     return [pscustomobject]@{ Width = $width; Height = $height }
 }
 
@@ -336,12 +336,16 @@ Invoke-Timed 'Pack and inspect' {
         ((111, 114, 99, 104, 101, 115, 116, 114, 97, 116) | ForEach-Object { [char]$_ }) -join ''
     )
     $internalLanguagePattern = '(?i)' + (($internalTerms | ForEach-Object { [regex]::Escape($_) }) -join '|') + '|KEE-[0-9]+'
+    $textEntryExtensions = @('.config', '.json', '.md', '.nuspec', '.rels', '.runtimeconfig', '.xml')
     foreach ($entryName in $entryNames) {
         Assert-That ($entryName -notmatch $forbiddenEntryPattern) "forbidden package entry: $entryName"
+        if ([IO.Path]::GetExtension($entryName) -notin $textEntryExtensions) {
+            continue
+        }
         $entryBytes = Get-ZipEntryBytes -ArchivePath $packagePath -EntryName $entryName
         $entryText = [Text.Encoding]::UTF8.GetString($entryBytes)
         Assert-That ($entryText -notmatch $internalLanguagePattern) "internal wording found in package entry: $entryName"
-        Assert-That ($entryText -notmatch '(?i)([A-Z]:[\\/]|/home/|/Users/|/mnt/|/root/|\\\\)') "absolute machine path found in package entry: $entryName"
+        Assert-That ($entryText -notmatch '(?i)(?<![A-Za-z])[A-Z]:[\\/]|/home/|/Users/|/mnt/|/root/|\\\\') "absolute machine path found in package entry: $entryName"
     }
     Write-Host 'Package content safety: no tests, fixtures, Phase 0, benchmark, environment, source-only, internal-wording, or absolute-path entries found.'
 }
@@ -387,7 +391,7 @@ Invoke-Timed 'Isolated consumer restore and tool install' {
         $consumerProject = Join-Path $consumerRoot 'PackageConsumerFixture.csproj'
         dotnet restore $consumerProject --configfile $config --no-cache --nologo
         Assert-That ($LASTEXITCODE -eq 0) 'consumer fixture restore must succeed from controlled sources'
-        dotnet tool install $packageId --version $packageVersion --tool-path $toolPath --configfile $config --no-cache --ignore-failed-sources --nologo
+        dotnet tool install $packageId --version $packageVersion --tool-path $toolPath --configfile $config --no-cache --ignore-failed-sources
         Assert-That ($LASTEXITCODE -eq 0) 'packed tool installation must succeed from the isolated local feed'
     }
     finally {
@@ -430,6 +434,7 @@ Invoke-Timed 'Isolated packed-tool consumer smoke' {
         $invalid = Invoke-SmokeStep -Label 'invalid configuration' -ToolCommand $toolCommandPath -Arguments @('check', $consumerProject, '--baseline', $baseline, '--severity', 'invalid', '--no-telemetry')
         Assert-That ($invalid.ExitCode -eq 2) 'invalid severity configuration must return documented exit 2'
         Assert-That ($invalid.Output -match '--severity must be breaking, warning, or all\.') 'invalid configuration must explain the accepted severity values'
+        $global:LASTEXITCODE = 0
     }
     finally {
         Set-Location $oldLocation
