@@ -1,0 +1,5 @@
+<Solution>
+  <Folder Name="/phase0/">
+    <Project Path="phase0/Phase0.LogSchemaProbe.csproj" />
+  </Folder>
+</Solution>
