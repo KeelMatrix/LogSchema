@@ -227,7 +227,9 @@ Invoke-Timed 'Line-ending contract' {
         }
     }
 
-    $validateAttributes = (& git -C $repositoryRoot check-attr eol -- build/validate.ps1 | Out-String).Trim()
+    $validateAttributesOutput = & git -C $repositoryRoot check-attr eol -- build/validate.ps1 | Out-String
+    Assert-That ($LASTEXITCODE -eq 0) 'git must read repository attributes for the line-ending check'
+    $validateAttributes = if ($null -eq $validateAttributesOutput) { '' } else { $validateAttributesOutput.Trim() }
     Assert-That ($validateAttributes -match 'build/validate\.ps1: eol: lf') 'repository attributes must require LF for PowerShell validation scripts'
 }
 Invoke-Timed 'Format and analyzer validation' { dotnet format $solution --no-restore --verify-no-changes --verbosity minimal }

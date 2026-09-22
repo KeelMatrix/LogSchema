@@ -86,6 +86,27 @@ function Get-FileHashUpper {
     return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToUpperInvariant()
 }
 
+function Get-GitValue {
+    param(
+        [Parameter(Mandatory = $true)][string]$WorkingDirectory,
+        [Parameter(Mandatory = $true)][string[]]$Arguments,
+        [Parameter(Mandatory = $true)][string]$Description,
+        [switch]$Required
+    )
+
+    $global:LASTEXITCODE = 0
+    $raw = (& git -C $WorkingDirectory @Arguments 2>$null | Out-String)
+    $exitCode = $LASTEXITCODE
+    $value = if ($null -eq $raw) { '' } else { ([string]$raw).Trim() }
+
+    if ($Required) {
+        Assert-That ($exitCode -eq 0) "Git could not provide $Description in '$WorkingDirectory' (exit code $exitCode). Ensure this is a valid Git checkout with the required repository metadata."
+        Assert-That ($value.Length -gt 0) "Git returned no $Description in '$WorkingDirectory'. Ensure the checkout contains the required repository metadata."
+    }
+
+    return $value
+}
+
 function Get-ZipEntryNames {
     param([Parameter(Mandatory = $true)][string]$ArchivePath)
 
@@ -186,12 +207,14 @@ if ($includeSymbols) {
     $expectedNames += "$packageId.$packageVersion.snupkg"
 }
 
-$commit = (git -C $repositoryRoot rev-parse HEAD).Trim()
-$branch = (git -C $repositoryRoot symbolic-ref --short -q HEAD).Trim()
-$origin = (git -C $repositoryRoot remote get-url origin).Trim()
-Assert-That ($LASTEXITCODE -eq 0 -and $commit.Length -eq 40) 'canonical checkout must provide a full commit SHA'
-Assert-That ($branch.Length -gt 0) 'canonical checkout must be attached to a named branch'
-Assert-That ($origin.Length -gt 0) 'canonical checkout must provide origin URL'
+$commit = Get-GitValue -WorkingDirectory $repositoryRoot -Arguments @('rev-parse', 'HEAD') -Description 'the current commit' -Required
+$branch = Get-GitValue -WorkingDirectory $repositoryRoot -Arguments @('symbolic-ref', '--short', '-q', 'HEAD') -Description 'the current branch name'
+$origin = Get-GitValue -WorkingDirectory $repositoryRoot -Arguments @('remote', 'get-url', 'origin') -Description 'the origin URL' -Required
+Assert-That ($commit -match '^[0-9a-fA-F]{40}$') 'canonical checkout must provide a full commit SHA'
+$attachedBranch = if ([string]::IsNullOrWhiteSpace($branch)) { 'repro-attached' } else { $branch }
+if ([string]::IsNullOrWhiteSpace($branch)) {
+    Write-Host "Canonical checkout is detached; using throwaway branch '$attachedBranch' for the attached pack phase."
+}
 
 $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('logschema-package-repro-' + [System.Guid]::NewGuid().ToString('N'))
 $attachedClone = Join-Path $tempRoot 'attached'
@@ -202,20 +225,22 @@ $alternateOutput = Join-Path $tempRoot 'alternate-package'
 
 try {
     New-Item -ItemType Directory -Force -Path $tempRoot | Out-Null
-    Invoke-Timed 'Clone attached fresh checkout' { git clone --branch $branch --single-branch --no-tags --no-local $repositoryRoot $attachedClone }
-    Assert-That ((git -C $attachedClone rev-parse HEAD).Trim() -eq $commit) 'attached clone must start at the canonical commit'
+    Invoke-Timed 'Clone attached fresh checkout' { git clone --no-tags --no-local $repositoryRoot $attachedClone }
+    Invoke-Timed 'Attach attached fresh checkout' { git -C $attachedClone checkout -B $attachedBranch $commit }
+    Assert-That ((Get-GitValue -WorkingDirectory $attachedClone -Arguments @('rev-parse', 'HEAD') -Description 'the attached clone commit' -Required) -eq $commit) 'attached clone must start at the canonical commit'
     Build-And-Pack -Label 'Attached clone' -CloneRoot $attachedClone -OutputDirectory $attachedOutput
 
     Invoke-Timed 'Detach attached checkout' { git -C $attachedClone checkout --detach $commit }
-    Assert-That ((git -C $attachedClone rev-parse HEAD).Trim() -eq $commit) 'detached checkout must remain at the canonical commit'
+    Assert-That ((Get-GitValue -WorkingDirectory $attachedClone -Arguments @('rev-parse', 'HEAD') -Description 'the detached checkout commit' -Required) -eq $commit) 'detached checkout must remain at the canonical commit'
     Build-And-Pack -Label 'Detached checkout' -CloneRoot $attachedClone -OutputDirectory $detachedOutput
 
     Write-Host "Commit under test: $commit"
     Assert-ArtifactSetsEqual -LeftLabel 'attached' -LeftDirectory $attachedOutput -RightLabel 'detached' -RightDirectory $detachedOutput -ExpectedNames $expectedNames
 
-    Invoke-Timed 'Clone alternate-origin checkout' { git clone --branch $branch --single-branch --no-tags --no-local $repositoryRoot $originClone }
+    Invoke-Timed 'Clone alternate-origin checkout' { git clone --no-tags --no-local $repositoryRoot $originClone }
+    Invoke-Timed 'Attach alternate-origin checkout' { git -C $originClone checkout -B $attachedBranch $commit }
     Invoke-Timed 'Set alternate-origin URL' { git -C $originClone remote set-url origin $origin }
-    Assert-That ((git -C $originClone rev-parse HEAD).Trim() -eq $commit) 'alternate-origin clone must start at the canonical commit'
+    Assert-That ((Get-GitValue -WorkingDirectory $originClone -Arguments @('rev-parse', 'HEAD') -Description 'the alternate-origin clone commit' -Required) -eq $commit) 'alternate-origin clone must start at the canonical commit'
     Build-And-Pack -Label 'Alternate-origin clone' -CloneRoot $originClone -OutputDirectory $alternateOutput
     Assert-ArtifactSetsEqual -LeftLabel 'attached' -LeftDirectory $attachedOutput -RightLabel 'alternate-origin' -RightDirectory $alternateOutput -ExpectedNames $expectedNames
     Write-Host 'Package reproducibility regression passed.'
