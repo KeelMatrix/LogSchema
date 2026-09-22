@@ -107,7 +107,7 @@ The stable diagnostic reference is in [COMPATIBILITY-RULES.md](COMPATIBILITY-RUL
 
 ## Cross-platform and SDK support
 
-The tool targets `net8.0` and is designed for Windows, Linux, and macOS SDK-style C# projects. The repository development SDK is pinned to `10.0.401`; the project loader uses centrally pinned Roslyn/MSBuild dependencies. Cross-platform evidence is recorded by the validation command and must be checked before making a release claim. The tool does not require a network connection after restore.
+The repository's validation evidence verifies Windows and Linux for SDK-style C# projects. macOS remains supported by design: the tool targets `net8.0`, has no OS-specific path or shell behavior, and uses centrally pinned Roslyn/MSBuild dependencies. macOS parity is not covered by the repository's local validation evidence and remains an explicit residual for external review; no verified macOS result is claimed. The repository development SDK is pinned to `10.0.401`, and the tool does not require a network connection after restore.
 
 ## Privacy and security
 

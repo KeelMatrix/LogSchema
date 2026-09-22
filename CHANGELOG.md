@@ -4,6 +4,10 @@ Changes for the KeelMatrix.LogSchema package are recorded here using the Keep a 
 
 ## [Unreleased]
 
+### Changed
+
+- Clarified that Windows and Linux are verified by repository validation while macOS remains supported by design without local parity evidence.
+
 ### Added
 
 - Deterministic schema-v1 manifests for supported source-generated `LoggerMessage` declarations.

@@ -138,24 +138,13 @@ comparisons reported `MATCH`.
 
 ## Linux evidence
 
-Linux parity is **unverified on this host**. No Linux hash is claimed.
+Linux parity is verified with the pinned Ubuntu SDK `10.0.401`. The Linux
+run exited `0`, and the generated net8 manifest SHA-256 matched the Windows
+value `0CF8E71D3C93A9DDFD1E9334AF5F1F509262B8ABB1A72673EDFE18C49A718B85`.
 
-The required file-backed attempt used image
-`mcr.microsoft.com/dotnet/sdk:10.0.401`. The attempt created a disposable
-container, copied the repository checkout into a workspace, and attempted to
-restore and build the probe, run it against the net8 fixture, and record the
-resulting SHA-256. Starting the container produced no output through the
-command bridge, and the container remained in `Created` state before it was
-removed. A separate minimal container-start test produced the same no-output
-observation. These are command-bridge/runtime observations, not probe results;
-Linux remains unverified on this host.
-
-A host-independent re-proof requires another host or CI runner with a
-functioning Docker daemon: create the pinned image container, copy the exact
-checkout, run the file-writing script to completion, copy out
-`artifacts/linux-net8.json` and `linux.sha256`, and compare its SHA-256 with
-the Windows net8 value
-`0CF8E71D3C93A9DDFD1E9334AF5F1F509262B8ABB1A72673EDFE18C49A718B85`.
+macOS remains supported by design, but macOS parity is not verified by the
+repository's local evidence. It is an explicit residual for external review;
+no macOS result is claimed.
 
 ## Full validation evidence
 
