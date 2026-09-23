@@ -24,5 +24,5 @@ The tool uses design-time MSBuild/Roslyn evaluation and never loads target appli
 - Shipping output is a deterministic schema-v1 manifest with no absolute machine paths.
 - Unsupported declarations are explicit; duplicate or ambiguous identities are analysis errors.
 - `check` never rewrites a baseline.
-- The root `icon.png` is founder-owned and must not be created or edited by repository tooling.
+- The root `icon.png` must not be created or edited by repository tooling.
 - Tests, fixtures, and the Phase 0 probe are non-packable.
