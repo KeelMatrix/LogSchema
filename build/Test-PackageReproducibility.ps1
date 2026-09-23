@@ -119,6 +119,20 @@ function Get-ZipEntryNames {
     }
 }
 
+function Get-ZipEntryMetadata {
+    param([Parameter(Mandatory = $true)][string]$ArchivePath)
+
+    $archive = [System.IO.Compression.ZipFile]::OpenRead($ArchivePath)
+    try {
+        return @($archive.Entries | ForEach-Object {
+            "{0}|length={1}|compressed={2}|timestamp={3}" -f $_.FullName, $_.Length, $_.CompressedLength, $_.LastWriteTime.UtcDateTime.ToString('O')
+        })
+    }
+    finally {
+        $archive.Dispose()
+    }
+}
+
 function Compare-ZipEntries {
     param(
         [Parameter(Mandatory = $true)][string]$LeftArchive,
@@ -169,14 +183,22 @@ function Assert-ArtifactSetsEqual {
         $leftHash = Get-FileHashUpper -Path $leftPath
         $rightHash = Get-FileHashUpper -Path $rightPath
         Write-Host ("Artifact {0}: {1} bytes={2} sha256={3}; {4} bytes={5} sha256={6}" -f $name, $LeftLabel, $leftBytes, $leftHash, $RightLabel, $rightBytes, $rightHash)
-        Assert-That ($leftBytes -eq $rightBytes -and $leftHash -eq $rightHash) "$name differs between $LeftLabel and $RightLabel."
-
         $zipDifferences = @(Compare-ZipEntries -LeftArchive $leftPath -RightArchive $rightPath)
         Write-Host ("ZIP-entry diff {0} vs {1} for {2}: {3}" -f $LeftLabel, $RightLabel, $name, $zipDifferences.Count)
         foreach ($difference in $zipDifferences) {
             Write-Host ("  ZIP DIFF: {0}" -f $difference)
         }
+        if ($leftBytes -ne $rightBytes -or $leftHash -ne $rightHash) {
+            $leftMetadata = @(Get-ZipEntryMetadata -ArchivePath $leftPath)
+            $rightMetadata = @(Get-ZipEntryMetadata -ArchivePath $rightPath)
+            $metadataDifferences = @(Compare-Object -ReferenceObject $leftMetadata -DifferenceObject $rightMetadata)
+            Write-Host ("ZIP metadata diff {0} vs {1} for {2}: {3}" -f $LeftLabel, $RightLabel, $name, $metadataDifferences.Count)
+            foreach ($metadataDifference in $metadataDifferences) {
+                Write-Host ("  ZIP METADATA DIFF [{0}]: {1}" -f $metadataDifference.SideIndicator, $metadataDifference.InputObject)
+            }
+        }
         Assert-That ($zipDifferences.Count -eq 0) "$name has differing ZIP entries between $LeftLabel and $RightLabel."
+        Assert-That ($leftBytes -eq $rightBytes -and $leftHash -eq $rightHash) "$name differs between $LeftLabel and $RightLabel."
     }
 }
 
