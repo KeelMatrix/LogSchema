@@ -21,6 +21,6 @@
     <TreatWarningsAsErrors Condition="'$(Configuration)' == 'Release'">true</TreatWarningsAsErrors>
     <ContinuousIntegrationBuild Condition="'$(Configuration)' == 'Release'">true</ContinuousIntegrationBuild>
     <!-- Keep deterministic compiler and PDB paths independent of checkout directories and aliases. -->
-    <PathMap Condition="'$(ContinuousIntegrationBuild)' == 'true'">/private/var=/_/,/var=/_/,$(MSBuildThisFileDirectory)=/_/</PathMap>
+    <PathMap Condition="'$(ContinuousIntegrationBuild)' == 'true'">$(MSBuildThisFileDirectory)=/_/</PathMap>
   </PropertyGroup>
 </Project>

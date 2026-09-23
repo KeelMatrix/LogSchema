@@ -241,7 +241,13 @@ if ([string]::IsNullOrWhiteSpace($branch)) {
     Write-Host "Canonical checkout is detached; using throwaway branch '$attachedBranch' for the attached pack phase."
 }
 
-$tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('logschema-package-repro-' + [System.Guid]::NewGuid().ToString('N'))
+$tempBase = if ([string]::IsNullOrWhiteSpace($env:RUNNER_TEMP)) {
+    [System.IO.Path]::GetTempPath()
+}
+else {
+    $env:RUNNER_TEMP
+}
+$tempRoot = Join-Path $tempBase ('logschema-package-repro-' + [System.Guid]::NewGuid().ToString('N'))
 $attachedClone = Join-Path $tempRoot 'attached'
 $originClone = Join-Path $tempRoot 'alternate-origin'
 $attachedOutput = Join-Path $tempRoot 'attached-package'
