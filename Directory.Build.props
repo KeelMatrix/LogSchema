@@ -16,8 +16,8 @@
     <NoWarn>$(NoWarn);NU1701</NoWarn>
     <Deterministic>true</Deterministic>
     <DebugType>portable</DebugType>
-    <!-- Keep shipped PDB bytes independent of checkout-origin SourceLink discovery. -->
-    <EnableSourceLink>false</EnableSourceLink>
+    <EnableSourceLink>true</EnableSourceLink>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
     <TreatWarningsAsErrors Condition="'$(Configuration)' == 'Release'">true</TreatWarningsAsErrors>
     <ContinuousIntegrationBuild Condition="'$(Configuration)' == 'Release'">true</ContinuousIntegrationBuild>
     <!-- Keep deterministic compiler and PDB paths independent of checkout directories and aliases. -->

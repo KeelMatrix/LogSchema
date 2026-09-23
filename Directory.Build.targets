@@ -1,0 +1,20 @@
+<Project>
+  <PropertyGroup>
+    <_KeelMatrixSensitivePackPattern>(?i)(^|/)(\.env(?:\..*)?$|nuget\.config$|appsettings\.(?:development|local)(?:\..*)?\.json$|local\.settings\.json$|telemetry(?:[._-].*)?\.(?:json|ya?ml|config)$|agents\.md$|context\.md$)|(^|/)(?:credentials?|secrets?|private-keys?|internal|research|review-evidence)(?:/|$)|(?:credential|secret|api[._-]?key|access[._-]?token|client[._-]?secret)|\.(?:pfx|p12|pem|key|snk)$</_KeelMatrixSensitivePackPattern>
+  </PropertyGroup>
+
+  <Target Name="RejectSensitivePackageContent" BeforeTargets="GenerateNuspec" Condition="'$(IsPackable)' == 'true'">
+    <ItemGroup>
+      <_KeelMatrixPackCandidate Include="@(None)" Condition="'%(None.Pack)' == 'true'" />
+      <_KeelMatrixPackCandidate Include="@(Content)" Condition="'%(Content.Pack)' == 'true'" />
+      <_KeelMatrixPackCandidate Include="@(EmbeddedResource)" Condition="'%(EmbeddedResource.Pack)' == 'true'" />
+      <_KeelMatrixPackCandidate Update="@(_KeelMatrixPackCandidate)">
+        <NormalizedPath>$([System.String]::Copy('%(Identity)').Replace('\', '/'))</NormalizedPath>
+      </_KeelMatrixPackCandidate>
+    </ItemGroup>
+
+    <Error
+      Condition="$([System.Text.RegularExpressions.Regex]::IsMatch('%(_KeelMatrixPackCandidate.NormalizedPath)', '$(_KeelMatrixSensitivePackPattern)'))"
+      Text="Sensitive package input is not allowed: %(_KeelMatrixPackCandidate.Identity)" />
+  </Target>
+</Project>

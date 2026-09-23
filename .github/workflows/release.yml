@@ -1,0 +1,175 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      release_version:
+        description: Version to validate without publishing (X.Y.Z)
+        required: true
+        default: '0.1.0'
+        type: string
+      dry_run:
+        description: Validate the release path without publishing
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate release artifacts
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      KEELMATRIX_NO_TELEMETRY: '1'
+      NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
+    outputs:
+      release_version: ${{ steps.release-version.outputs.version }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Derive one release version
+        id: release-version
+        shell: pwsh
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_VERSION: ${{ inputs.release_version }}
+          INPUT_DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          if ($env:EVENT_NAME -eq 'push') {
+            if ($env:REF_NAME -notmatch '^v(?<version>(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*))$') {
+              throw "Malformed release tag '$env:REF_NAME'. Expected vX.Y.Z."
+            }
+            $version = $Matches.version
+          }
+          elseif ($env:EVENT_NAME -eq 'workflow_dispatch') {
+            if ($env:INPUT_DRY_RUN -ne 'true') {
+              throw 'Manual release runs are validation-only; dry_run must be true.'
+            }
+            if ($env:INPUT_VERSION -notmatch '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$') {
+              throw "Malformed dry-run version '$env:INPUT_VERSION'. Expected X.Y.Z."
+            }
+            $version = $env:INPUT_VERSION
+          }
+          else {
+            throw "Unsupported release event '$env:EVENT_NAME'."
+          }
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "Release version: $version"
+
+      - name: Set up .NET SDK from global.json
+        uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      - name: Enforce finalized changelog and version contract
+        if: github.event_name == 'push'
+        shell: pwsh
+        run: ./build/Test-ReleaseVersion.ps1 -Version '${{ steps.release-version.outputs.version }}'
+
+      - name: Run release-equivalent validation
+        shell: pwsh
+        run: ./build/validate.ps1 -ReleaseVersion '${{ steps.release-version.outputs.version }}'
+
+      - name: Validate exact release artifact set
+        shell: pwsh
+        run: |
+          $version = '${{ steps.release-version.outputs.version }}'
+          $expected = @(
+            "KeelMatrix.LogSchema.$version.nupkg",
+            "KeelMatrix.LogSchema.$version.snupkg"
+          )
+          $actual = @(Get-ChildItem -LiteralPath artifacts/validation/package -File | Select-Object -ExpandProperty Name | Sort-Object)
+          $differences = @(Compare-Object -ReferenceObject $expected -DifferenceObject $actual)
+          if ($differences.Count -ne 0) {
+            $differences | Format-Table | Out-String | Write-Host
+            throw "Release artifacts must be exactly: $($expected -join ', ')"
+          }
+
+      - name: Upload validated release artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: KeelMatrix.LogSchema-${{ steps.release-version.outputs.version }}
+          path: |
+            artifacts/validation/package/KeelMatrix.LogSchema.${{ steps.release-version.outputs.version }}.nupkg
+            artifacts/validation/package/KeelMatrix.LogSchema.${{ steps.release-version.outputs.version }}.snupkg
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Record dry-run boundary
+        if: github.event_name == 'workflow_dispatch'
+        shell: pwsh
+        run: Write-Host 'Dry run complete. Validated artifacts were uploaded; authentication, publication, and GitHub Release creation were not run.'
+
+  publish:
+    name: Publish validated release
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      id-token: write
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      KEELMATRIX_NO_TELEMETRY: '1'
+    steps:
+      - name: Download validated release artifacts
+        uses: actions/download-artifact@v7
+        with:
+          name: KeelMatrix.LogSchema-${{ needs.validate.outputs.release_version }}
+          path: artifacts/release
+
+      - name: Revalidate exact publish set
+        shell: pwsh
+        run: |
+          $version = '${{ needs.validate.outputs.release_version }}'
+          $expected = @(
+            "KeelMatrix.LogSchema.$version.nupkg",
+            "KeelMatrix.LogSchema.$version.snupkg"
+          )
+          $actual = @(Get-ChildItem -LiteralPath artifacts/release -File | Select-Object -ExpandProperty Name | Sort-Object)
+          $differences = @(Compare-Object -ReferenceObject $expected -DifferenceObject $actual)
+          if ($differences.Count -ne 0) {
+            $differences | Format-Table | Out-String | Write-Host
+            throw "Publish artifacts must be exactly: $($expected -join ', ')"
+          }
+
+      - name: Authenticate to NuGet.org
+        id: nuget-login
+        uses: NuGet/login@v1
+        with:
+          user: dmitriyzen
+
+      - name: Publish package and symbols
+        shell: pwsh
+        run: |
+          $version = '${{ needs.validate.outputs.release_version }}'
+          dotnet nuget push "artifacts/release/KeelMatrix.LogSchema.$version.nupkg" `
+            --source https://api.nuget.org/v3/index.json `
+            --api-key '${{ steps.nuget-login.outputs.NUGET_API_KEY }}'
+
+      - name: Create GitHub Release after publication
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = '${{ needs.validate.outputs.release_version }}'
+          gh release create '${{ github.ref_name }}' `
+            "artifacts/release/KeelMatrix.LogSchema.$version.nupkg" `
+            "artifacts/release/KeelMatrix.LogSchema.$version.snupkg" `
+            --verify-tag `
+            --title "KeelMatrix.LogSchema $version" `
+            --generate-notes

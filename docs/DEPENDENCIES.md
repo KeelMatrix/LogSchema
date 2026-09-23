@@ -17,13 +17,15 @@ Versions are centrally pinned in `Directory.Packages.props`. The Phase 0 probe k
 
 ## Verification
 
-Run the following after controlled restore to print direct and transitive package versions and to query NuGet vulnerability metadata:
+Run the following after controlled restore to print direct and transitive package versions and produce the same versioned machine-readable vulnerability reports consumed by the repository gate:
 
 ```powershell
-dotnet list src/KeelMatrix.LogSchema.Core/KeelMatrix.LogSchema.Core.csproj package --include-transitive --framework net8.0 --no-restore
-dotnet list src/KeelMatrix.LogSchema/KeelMatrix.LogSchema.csproj package --include-transitive --framework net8.0 --no-restore
-dotnet list src/KeelMatrix.LogSchema.Core/KeelMatrix.LogSchema.Core.csproj package --vulnerable --include-transitive --framework net8.0 --no-restore
-dotnet list src/KeelMatrix.LogSchema/KeelMatrix.LogSchema.csproj package --vulnerable --include-transitive --framework net8.0 --no-restore
+dotnet package list --project src/KeelMatrix.LogSchema.Core/KeelMatrix.LogSchema.Core.csproj --include-transitive --framework net8.0 --no-restore
+dotnet package list --project src/KeelMatrix.LogSchema/KeelMatrix.LogSchema.csproj --include-transitive --framework net8.0 --no-restore
+dotnet package list --project src/KeelMatrix.LogSchema.Core/KeelMatrix.LogSchema.Core.csproj --vulnerable --include-transitive --framework net8.0 --no-restore --config NuGet.config --format json --output-version 1
+dotnet package list --project src/KeelMatrix.LogSchema/KeelMatrix.LogSchema.csproj --vulnerable --include-transitive --framework net8.0 --no-restore --config NuGet.config --format json --output-version 1
 ```
 
-Every resolved package serves semantic project loading, the supported CLI, or framework-provided serialization. The package gate separately inspects the generated `.nuspec`, confirms the consumer-visible dependency set, and rejects vulnerable or unrelated content.
+`build/Test-VulnerabilityReport.ps1` validates the report version, requested direct-and-transitive audit mode, controlled vulnerability source, expected project identity, and every reported advisory. It fails on any finding, nonzero audit command result, malformed or incomplete report, missing source, or unexpected project, so failure to obtain usable audit data cannot be reported as a clean result. Regression cases cover a clean report, a vulnerability finding, command failure, and unusable audit data.
+
+Every resolved package serves semantic project loading, the supported CLI, or framework-provided serialization. The package gate separately inspects both generated archives and nuspecs, confirms the consumer-visible dependency set and exact expected contents, and rejects vulnerable or unrelated content.

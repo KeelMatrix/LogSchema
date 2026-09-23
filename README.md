@@ -134,9 +134,11 @@ dotnet test tests/KeelMatrix.LogSchema.Tests/KeelMatrix.LogSchema.Tests.csproj -
 pwsh ./build/validate.ps1
 ```
 
-The Phase 0 semantic probe and fixtures remain in `phase0/` and `fixtures/` as regression evidence. The shipping tool is in `src/KeelMatrix.LogSchema/`; its project-local README is the README input for the later package step.
+The Phase 0 semantic probe and fixtures remain in `phase0/` and `fixtures/` as regression evidence. The shipping tool is in `src/KeelMatrix.LogSchema/`; its project-local README is the README input for the package step.
 
-Repository text sources use canonical LF line endings so a normal Windows clone with `core.autocrlf=true` remains format-clean. `dotnet pack` uses a fixed deterministic ZIP timestamp and excludes checkout-derived branch and SourceLink metadata; `build/validate.ps1` requires `.nupkg`/`.snupkg` bytes to remain identical across attached, detached, alternate-origin, and alternate-directory checkouts.
+Repository text sources use canonical LF line endings so a normal Windows clone with `core.autocrlf=true` remains format-clean. `dotnet pack` uses a fixed deterministic ZIP timestamp and emits portable PDBs with canonical GitHub SourceLink mappings for the exact repository commit. `build/validate.ps1` inspects both package archives, their portable PDBs, and their SourceLink records, rejects private machine paths and unexpected content, and requires artifact bytes to remain identical across attached, detached, and alternate-directory checkouts that use the canonical repository URL.
+
+`build/Test-ReleaseVersion.ps1` is the source of truth for the pre-tag changelog, release-date, and package-version contract. The tag-triggered release workflow reruns that check before building or publishing. Its manual `workflow_dispatch` path is dry-run only: it exercises the release-equivalent restore, build, test, vulnerability, pack, archive, SourceLink, and installed-tool gates, uploads the validated artifacts for inspection, and cannot authenticate, publish, or create a GitHub Release.
 
 ## License
 

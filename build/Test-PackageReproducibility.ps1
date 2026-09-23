@@ -1,5 +1,6 @@
 param(
-    [Parameter(Mandatory = $true)][string]$RepositoryRoot
+    [Parameter(Mandatory = $true)][string]$RepositoryRoot,
+    [Parameter(Mandatory = $true)][string]$ReleaseVersion
 )
 
 $ErrorActionPreference = 'Stop'
@@ -36,7 +37,7 @@ function Invoke-Timed {
 function Get-ProjectProperties {
     param([Parameter(Mandatory = $true)][string]$Project)
 
-    $json = (& dotnet msbuild $Project -getProperty:PackageId -getProperty:PackageVersion -getProperty:IncludeSymbols -nologo | Out-String)
+    $json = (& dotnet msbuild $Project -getProperty:PackageId -getProperty:PackageVersion -getProperty:IncludeSymbols -p:Version=$ReleaseVersion -nologo | Out-String)
     Assert-That ($LASTEXITCODE -eq 0) "Could not read package properties from $Project."
     return $json | ConvertFrom-Json
 }
@@ -216,9 +217,9 @@ function Build-And-Pack {
     # platform-specific filesystem timing cannot race on the generated assets files.
     # Restore the packable project directly so solution-level path aliases cannot
     # evaluate the referenced Core project twice on macOS.
-    Invoke-Timed "$Label restore" { dotnet restore $toolProject --configfile $config --disable-parallel --nologo }
-    Invoke-Timed "$Label build" { dotnet build $toolProject -c Release --no-restore --nologo }
-    Invoke-Timed "$Label pack" { dotnet pack $toolProject -c Release --no-build --no-restore --nologo -o $OutputDirectory }
+    Invoke-Timed "$Label restore" { dotnet restore $toolProject --configfile $config --disable-parallel -p:Version=$ReleaseVersion --nologo }
+    Invoke-Timed "$Label build" { dotnet build $toolProject -c Release --no-restore -p:Version=$ReleaseVersion --nologo }
+    Invoke-Timed "$Label pack" { dotnet pack $toolProject -c Release --no-build --no-restore -p:Version=$ReleaseVersion --nologo -o $OutputDirectory }
 }
 
 $repositoryRoot = (Resolve-Path -LiteralPath $RepositoryRoot).Path
@@ -258,6 +259,7 @@ try {
     New-Item -ItemType Directory -Force -Path $tempRoot | Out-Null
     Invoke-Timed 'Clone attached fresh checkout' { git clone --no-tags --no-local $repositoryRoot $attachedClone }
     Invoke-Timed 'Attach attached fresh checkout' { git -C $attachedClone checkout -B $attachedBranch $commit }
+    Invoke-Timed 'Set canonical attached origin URL' { git -C $attachedClone remote set-url origin $origin }
     Assert-That ((Get-GitValue -WorkingDirectory $attachedClone -Arguments @('rev-parse', 'HEAD') -Description 'the attached clone commit' -Required) -eq $commit) 'attached clone must start at the canonical commit'
     Build-And-Pack -Label 'Attached clone' -CloneRoot $attachedClone -OutputDirectory $attachedOutput
 
@@ -268,12 +270,12 @@ try {
     Write-Host "Commit under test: $commit"
     Assert-ArtifactSetsEqual -LeftLabel 'attached' -LeftDirectory $attachedOutput -RightLabel 'detached' -RightDirectory $detachedOutput -ExpectedNames $expectedNames
 
-    Invoke-Timed 'Clone alternate-origin checkout' { git clone --no-tags --no-local $repositoryRoot $originClone }
-    Invoke-Timed 'Attach alternate-origin checkout' { git -C $originClone checkout -B $attachedBranch $commit }
-    Invoke-Timed 'Set alternate-origin URL' { git -C $originClone remote set-url origin $origin }
-    Assert-That ((Get-GitValue -WorkingDirectory $originClone -Arguments @('rev-parse', 'HEAD') -Description 'the alternate-origin clone commit' -Required) -eq $commit) 'alternate-origin clone must start at the canonical commit'
-    Build-And-Pack -Label 'Alternate-origin clone' -CloneRoot $originClone -OutputDirectory $alternateOutput
-    Assert-ArtifactSetsEqual -LeftLabel 'attached' -LeftDirectory $attachedOutput -RightLabel 'alternate-origin' -RightDirectory $alternateOutput -ExpectedNames $expectedNames
+    Invoke-Timed 'Clone alternate-directory checkout' { git clone --no-tags --no-local $repositoryRoot $originClone }
+    Invoke-Timed 'Attach alternate-directory checkout' { git -C $originClone checkout -B $attachedBranch $commit }
+    Invoke-Timed 'Set canonical alternate-directory origin URL' { git -C $originClone remote set-url origin $origin }
+    Assert-That ((Get-GitValue -WorkingDirectory $originClone -Arguments @('rev-parse', 'HEAD') -Description 'the alternate-directory clone commit' -Required) -eq $commit) 'alternate-directory clone must start at the canonical commit'
+    Build-And-Pack -Label 'Alternate-directory clone' -CloneRoot $originClone -OutputDirectory $alternateOutput
+    Assert-ArtifactSetsEqual -LeftLabel 'attached' -LeftDirectory $attachedOutput -RightLabel 'alternate-directory' -RightDirectory $alternateOutput -ExpectedNames $expectedNames
     Write-Host 'Package reproducibility regression passed.'
 }
 finally {
