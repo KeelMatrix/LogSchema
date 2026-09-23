@@ -142,9 +142,8 @@ Linux parity is verified with the pinned Ubuntu SDK `10.0.401`. The Linux
 run exited `0`, and the generated net8 manifest SHA-256 matched the Windows
 value `0CF8E71D3C93A9DDFD1E9334AF5F1F509262B8ABB1A72673EDFE18C49A718B85`.
 
-macOS remains supported by design, but macOS parity is not verified by the
-repository's local evidence. It is an explicit residual for external review;
-no macOS result is claimed.
+macOS remains supported by design. The public CI workflow includes a macOS leg;
+its first green result will be recorded here before macOS parity is claimed.
 
 ## Full validation evidence
 
@@ -170,6 +169,7 @@ Probe multi-target net8: 4.99s
 Probe multi-target net10: 4.65s
 ```
 
-No remote CI workflow was added or used. The repository remains private and
-contains no packable project, so the required icon path set remains empty for
-this Phase 0 prototype.
+The public CI workflow runs the restore, Release build, tests, Phase 0 matrix,
+manifest determinism, package reproducibility, and isolated package-consumer
+smoke on Ubuntu, Windows, and macOS. This Phase 0 prototype remains
+non-packable, so it has no package icon path of its own.
