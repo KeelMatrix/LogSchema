@@ -24,5 +24,6 @@ Structured identity fields use exact ordinal semantics: comparisons are case-sen
 | Code | Condition | Result |
 | --- | --- | --- |
 | KMLOGP006 | No supported `[LoggerMessage]` declarations were found. | `capture` and `check` return exit 3; `capture` writes no baseline and `check` rejects a zero-event baseline. |
+| KMLOGP007 | The manifest contains unsupported declarations. | `check` and `diff` return exit 3 and report the unsupported declaration identities and reasons; the supported subset is not presented as complete coverage. |
 
 Rules apply to C# methods using `Microsoft.Extensions.Logging.LoggerMessageAttribute` within the documented v1 supported declaration scope. Manual logging calls, runtime values, providers, and arbitrary third-party generators are not compared.

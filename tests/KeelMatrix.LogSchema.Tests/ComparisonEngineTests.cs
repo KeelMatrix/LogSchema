@@ -61,6 +61,59 @@ public sealed class ComparisonEngineTests
     }
 
     [Fact]
+    public void CombinedAdditionAndReorderReportsBothChanges()
+    {
+        var report = Compare(
+            Manifest(Event("Old", 1, "Old", "Information", "old {A} {B}", "A", "B")),
+            Manifest(Event("Old", 1, "Old", "Information", "new {B} {A} {C}", "B", "A", "C")),
+            SeverityGate.All);
+
+        Assert.Contains(report.Findings, finding => finding.Code == "KMLOG103");
+        Assert.Contains(report.Findings, finding => finding.Code == "KMLOG104" && finding.NewValue == "C");
+    }
+
+    [Fact]
+    public void RepeatedPlaceholderRemovalAndAdditionPreserveMultiplicity()
+    {
+        var removal = Compare(
+            Manifest(Event("Old", 1, "Old", "Information", "old {A} {A}", "A", "A")),
+            Manifest(Event("Old", 1, "Old", "Information", "new {A}", "A")),
+            SeverityGate.All);
+        var addition = Compare(
+            Manifest(Event("Old", 1, "Old", "Information", "old {A}", "A")),
+            Manifest(Event("Old", 1, "Old", "Information", "new {A} {A}", "A", "A")),
+            SeverityGate.All);
+
+        Assert.Equal("KMLOG101", Assert.Single(removal.Findings).Code);
+        Assert.Equal("KMLOG104", Assert.Single(addition.Findings).Code);
+    }
+
+    [Fact]
+    public void CombinedReorderAndAdditionIsReportedInReverseDirection()
+    {
+        var report = Compare(
+            Manifest(Event("Old", 1, "Old", "Information", "old {B} {A} {C}", "B", "A", "C")),
+            Manifest(Event("Old", 1, "Old", "Information", "new {A} {B}", "A", "B")),
+            SeverityGate.All);
+
+        Assert.Contains(report.Findings, finding => finding.Code == "KMLOG103");
+        Assert.Contains(report.Findings, finding => finding.Code == "KMLOG101" && finding.OldValue == "C");
+    }
+
+    [Fact]
+    public void BaselineAnalysisErrorsAreRejected()
+    {
+        var oldManifest = Manifest(Event("Old", 1, "Old", "Information", "old {Value}", "Value")) with
+        {
+            AnalysisIssues = [new AnalysisIssue("P|net8.0", "KMLOGP001", "error", "ambiguous", "identity", [])]
+        };
+
+        var report = Compare(oldManifest, Manifest(Event("Old", 1, "Old", "Information", "old {Value}", "Value")), SeverityGate.All);
+
+        Assert.Contains(report.AnalysisErrors, error => error.StartsWith("KMLOGP001:", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void LevelChangeIsWarningAndTemplateProseChangeIsInfo()
     {
         var warning = Compare(Manifest(Event("Old", 1, "Old", "Information", "old {Value}", "Value")), Manifest(Event("Old", 1, "Old", "Warning", "old {Value}", "Value")), SeverityGate.Breaking);

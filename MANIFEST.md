@@ -5,10 +5,10 @@ The default file is `logschema.json`. The top-level `schemaVersion` is an intege
 ## Shape
 
 - `projects`: project identity records with a stable key, project name, assembly name, and selected target framework.
-- `events`: supported event records with project key, full method identity, containing type, method, generic arity, parameter ref kinds, EventId, EventName, level, message template, ordered placeholders, special parameter forms, and project-relative source provenance.
+- `events`: supported event records with project key, full method identity, containing type, method, generic arity, parameter ref kinds, effective EventId, effective EventName, effective level, message template, ordered placeholders, special parameter forms, and project-relative source provenance. When EventId is omitted, the extractor records the pinned generator's deterministic non-randomized hash of the effective EventName. When EventName is omitted, the effective method name is recorded. An omitted level is recorded as `Dynamic` when a `LogLevel` parameter supplies it; an explicit `LogLevel.None` remains `None`.
 - `unsupported`: every discovered but unsupported declaration, including normalized declaration text, identity, source provenance, and reason.
 - `analysisIssues`: explicit warnings/errors such as ambiguous identity, unpaired generated declarations, workspace failures, an untrustworthy compilation, or `KMLOGP006` when no supported `[LoggerMessage]` declarations were found.
-- `compilationDiagnosticKinds` and `workspaceDiagnosticKinds`: sorted diagnostic categories without source paths or raw machine-specific messages.
+- `compilationDiagnosticKinds` and `workspaceDiagnosticKinds`: sorted diagnostic categories without source paths or raw machine-specific messages. All seven top-level fields are required, including empty diagnostic arrays.
 
 ## Canonicalization
 
@@ -18,9 +18,11 @@ The serializer normalizes line endings in declaration text and JSON output. Sour
 
 ## Parsing safety and compatibility
 
-The parser accepts at most 4 MiB and JSON nesting depth 32. It rejects malformed JSON, comments, trailing commas, incomplete required fields, non-canonical source paths, oversized record arrays, and any schema version other than 1. A failed parse is an analysis failure and returns exit code 3. Baselines are never changed by `check` or `diff`.
+The parser and writer use the same 4 MiB UTF-8 resource limit and JSON nesting depth 32. The reader rejects malformed JSON, comments, trailing commas, incomplete required fields, null records, non-canonical identities or source paths, unrelated project references, oversized record arrays, and any schema version other than 1. A failed parse is an analysis failure and returns exit code 3. Capture validates a serialized round trip and writes through a temporary file before replacing the destination, so a failed capture does not truncate an existing manifest. Baselines are never changed by `check` or `diff`.
 
 An analysis that discovers zero supported events reports `KMLOGP006` and returns exit code 3. `capture` does not write a zero-event baseline. `check` rejects both a zero-event current analysis and a baseline manifest with zero events; `diff` remains a pure comparison of the two manifests and does not apply this project-analysis rule.
+
+Unsupported declarations are retained with their identities and reasons. `check` and `diff` report incomplete coverage as analysis diagnostic `KMLOGP007` and return exit code 3 rather than presenting the supported subset as a complete comparison.
 
 ## Trust boundary
 

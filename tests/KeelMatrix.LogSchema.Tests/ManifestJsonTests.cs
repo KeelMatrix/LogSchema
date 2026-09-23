@@ -33,12 +33,28 @@ public sealed class ManifestJsonTests
         var root = Path.Combine(Path.GetTempPath(), "logschema-tests-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
         var future = Path.Combine(root, "future.json");
+        var stringVersion = Path.Combine(root, "string-version.json");
+        var fractionalVersion = Path.Combine(root, "fractional-version.json");
         var malformed = Path.Combine(root, "malformed.json");
-        await File.WriteAllTextAsync(future, "{\"schemaVersion\":99}");
+        await File.WriteAllTextAsync(future, """
+        {
+          "schemaVersion": 99,
+          "projects": [],
+          "events": [],
+          "unsupported": [],
+          "analysisIssues": [],
+          "compilationDiagnosticKinds": [],
+          "workspaceDiagnosticKinds": []
+        }
+        """);
+        await File.WriteAllTextAsync(stringVersion, "{\"schemaVersion\":\"1\",\"projects\":[],\"events\":[],\"unsupported\":[],\"analysisIssues\":[],\"compilationDiagnosticKinds\":[],\"workspaceDiagnosticKinds\":[]}");
+        await File.WriteAllTextAsync(fractionalVersion, "{\"schemaVersion\":1.0,\"projects\":[],\"events\":[],\"unsupported\":[],\"analysisIssues\":[],\"compilationDiagnosticKinds\":[],\"workspaceDiagnosticKinds\":[]}");
         await File.WriteAllTextAsync(malformed, "{\"schemaVersion\":1");
         try
         {
             await Assert.ThrowsAsync<ManifestReadException>(() => ManifestJson.ReadAsync(future, CancellationToken.None));
+            await Assert.ThrowsAsync<ManifestReadException>(() => ManifestJson.ReadAsync(stringVersion, CancellationToken.None));
+            await Assert.ThrowsAsync<ManifestReadException>(() => ManifestJson.ReadAsync(fractionalVersion, CancellationToken.None));
             await Assert.ThrowsAsync<ManifestReadException>(() => ManifestJson.ReadAsync(malformed, CancellationToken.None));
         }
         finally
@@ -77,6 +93,104 @@ public sealed class ManifestJsonTests
         finally
         {
             Directory.Delete(root, true);
+        }
+    }
+
+    [Fact]
+    public async Task MissingRequiredArraysAndEventFieldsFailClosed()
+    {
+        var root = Directory.CreateTempSubdirectory("logschema-incomplete-");
+        var missingArrays = Path.Combine(root.FullName, "missing-arrays.json");
+        var incompleteEvent = Path.Combine(root.FullName, "incomplete-event.json");
+        await File.WriteAllTextAsync(missingArrays, "{\"schemaVersion\":1,\"projects\":[],\"events\":[],\"unsupported\":[],\"analysisIssues\":[]}");
+        await File.WriteAllTextAsync(incompleteEvent, """
+        {
+          "schemaVersion": 1,
+          "projects": [{ "key": "P|net8.0", "name": "P", "assembly": "P", "targetFramework": "net8.0" }],
+          "events": [{
+            "projectKey": "P|net8.0",
+            "identity": "P.Logging.Event",
+            "containingType": "P.Logging",
+            "method": "Event",
+            "genericArity": 0,
+            "parameterRefKinds": ["None"],
+            "eventName": "Event",
+            "level": "Information",
+            "message": "Event",
+            "placeholders": [],
+            "parameterForms": ["ILogger"],
+            "source": { "file": "Logging.cs", "line": 1, "kind": "source" }
+          }],
+          "unsupported": [],
+          "analysisIssues": [],
+          "compilationDiagnosticKinds": [],
+          "workspaceDiagnosticKinds": []
+        }
+        """);
+        try
+        {
+            await Assert.ThrowsAsync<ManifestReadException>(() => ManifestJson.ReadAsync(missingArrays, CancellationToken.None));
+            await Assert.ThrowsAsync<ManifestReadException>(() => ManifestJson.ReadAsync(incompleteEvent, CancellationToken.None));
+        }
+        finally
+        {
+            root.Delete(true);
+        }
+    }
+
+    [Fact]
+    public async Task FailedOversizedWriteDoesNotReplaceExistingManifest()
+    {
+        var root = Directory.CreateTempSubdirectory("logschema-write-");
+        var path = Path.Combine(root.FullName, "logschema.json");
+        await File.WriteAllTextAsync(path, "existing baseline");
+        var huge = new string('x', ManifestJson.MaxBytes);
+        var manifest = new ManifestDocument(
+            1,
+            [new ProjectIdentity("P|net8.0", "P", "P", "net8.0")],
+            [new EventContract("P|net8.0", "P.Event", "P", "Event", 0, ["None"], 1, "Event", "Information", huge, [], ["ILogger"], new SourceLocation("Logging.cs", 1, "source"))],
+            [], [], [], []);
+        try
+        {
+            await Assert.ThrowsAsync<ManifestWriteException>(() => ManifestJson.WriteAsync(manifest, path, CancellationToken.None));
+            Assert.Equal("existing baseline", await File.ReadAllTextAsync(path));
+        }
+        finally
+        {
+            root.Delete(true);
+        }
+    }
+
+    [Fact]
+    public async Task IncompleteOutputDestinationFailsWithoutReplacingDirectory()
+    {
+        var root = Directory.CreateTempSubdirectory("logschema-output-");
+        var destination = Path.Combine(root.FullName, "destination");
+        Directory.CreateDirectory(destination);
+        var manifest = new ManifestDocument(1, [], [], [], [], [], []);
+        try
+        {
+            await Assert.ThrowsAsync<ManifestWriteException>(() => ManifestJson.WriteAsync(manifest, destination, CancellationToken.None));
+            Assert.True(Directory.Exists(destination));
+        }
+        finally
+        {
+            root.Delete(true);
+        }
+    }
+
+    [Fact]
+    public async Task DirectoryInputFailsWithoutPathLeakage()
+    {
+        var root = Directory.CreateTempSubdirectory("logschema-input-");
+        try
+        {
+            var exception = await Assert.ThrowsAsync<ManifestReadException>(() => ManifestJson.ReadAsync(root.FullName, CancellationToken.None));
+            Assert.DoesNotContain(root.FullName, exception.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            root.Delete(true);
         }
     }
 }

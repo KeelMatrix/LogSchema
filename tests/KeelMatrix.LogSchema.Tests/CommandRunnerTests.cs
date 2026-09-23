@@ -1,3 +1,4 @@
+using System.Text.Json;
 using KeelMatrix.LogSchema;
 
 namespace KeelMatrix.LogSchema.Tests;
@@ -25,6 +26,36 @@ public sealed class CommandRunnerTests
         Assert.Equal(2, exitCode);
         Assert.Contains("toolErrors", output.ToString(), StringComparison.Ordinal);
         Assert.Contains("two manifest files", output.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public Task MissingBaselineAfterFormatPreservesJsonEnvelope() => AssertMissingOptionValuePreservesJsonEnvelope(["check", "Project.csproj", "--format", "json", "--baseline"]);
+
+    [Fact]
+    public Task MissingBaselineBeforeFormatPreservesJsonEnvelope() => AssertMissingOptionValuePreservesJsonEnvelope(["check", "Project.csproj", "--baseline", "--format", "json"]);
+
+    private static async Task AssertMissingOptionValuePreservesJsonEnvelope(string[] args)
+    {
+        using var output = new StringWriter();
+        using var errors = new StringWriter();
+
+        var exitCode = await CommandRunner.RunAsync(args, output, errors);
+
+        Assert.Equal(2, exitCode);
+        Assert.Contains("\"toolErrors\"", output.ToString(), StringComparison.Ordinal);
+        Assert.Empty(errors.ToString());
+    }
+
+    [Fact]
+    public async Task NumericFormatValueIsRejected()
+    {
+        using var output = new StringWriter();
+        using var errors = new StringWriter();
+
+        var exitCode = await CommandRunner.RunAsync(["diff", "one.json", "two.json", "--format", "99"], output, errors);
+
+        Assert.Equal(2, exitCode);
+        Assert.Contains("text or json", errors.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -95,6 +126,82 @@ public sealed class CommandRunnerTests
         {
             Directory.Delete(Path.GetDirectoryName(baselinePath)!, true);
         }
+    }
+
+    [Fact]
+    public async Task UnsupportedCoverageGatesCheckAndReturnsDetails()
+    {
+        var projectPath = FindRepositoryFile("tests", "PackageConsumerFixture", "PackageConsumerFixture.csproj");
+        var root = Directory.CreateTempSubdirectory("logschema-unsupported-");
+        var capturedPath = Path.Combine(root.FullName, "captured.json");
+        var baselinePath = Path.Combine(root.FullName, "baseline.json");
+        try
+        {
+            using var captureOutput = new StringWriter();
+            using var captureErrors = new StringWriter();
+            Assert.Equal(0, await CommandRunner.RunAsync(["capture", projectPath, "--output", capturedPath, "--no-telemetry"], captureOutput, captureErrors));
+            var captured = await ManifestJson.ReadAsync(capturedPath, CancellationToken.None);
+            var projectKey = captured.Projects[0].Key;
+            var baseline = captured with
+            {
+                Unsupported = [new UnsupportedDeclaration(projectKey, new SourceLocation("ConsumerLogging.cs", 1, "source"), "unsupported declaration", "PackageConsumerFixture.Unsupported", "unsupported form")]
+            };
+            await ManifestJson.WriteAsync(baseline, baselinePath, CancellationToken.None);
+
+            using var output = new StringWriter();
+            using var errors = new StringWriter();
+            var exitCode = await CommandRunner.RunAsync(["check", projectPath, "--baseline", baselinePath, "--format", "json", "--no-telemetry"], output, errors);
+
+            Assert.Equal(3, exitCode);
+            Assert.Empty(errors.ToString());
+            using var document = JsonDocument.Parse(output.ToString());
+            Assert.Contains(document.RootElement.GetProperty("analysisErrors").EnumerateArray(), item => item.GetString()!.StartsWith("KMLOGP007:", StringComparison.Ordinal));
+            var unsupported = Assert.Single(document.RootElement.GetProperty("unsupported").EnumerateArray());
+            Assert.Equal("PackageConsumerFixture.Unsupported", unsupported.GetProperty("declarationKey").GetString());
+            Assert.Equal("unsupported form", unsupported.GetProperty("reason").GetString());
+            Assert.False(document.RootElement.GetProperty("coverageComplete").GetBoolean());
+        }
+        finally
+        {
+            root.Delete(true);
+        }
+    }
+
+    [Fact]
+    public async Task UnavailableOutputDestinationReturnsJsonAnalysisEnvelope()
+    {
+        var projectPath = FindRepositoryFile("tests", "PackageConsumerFixture", "PackageConsumerFixture.csproj");
+        var root = Directory.CreateTempSubdirectory("logschema-cli-output-");
+        try
+        {
+            using var output = new StringWriter();
+            using var errors = new StringWriter();
+            var exitCode = await CommandRunner.RunAsync(["capture", projectPath, "--output", root.FullName, "--format", "json", "--no-telemetry"], output, errors);
+
+            Assert.Equal(3, exitCode);
+            Assert.Empty(errors.ToString());
+            Assert.Contains("analysisErrors", output.ToString(), StringComparison.Ordinal);
+            Assert.DoesNotContain(root.FullName, output.ToString(), StringComparison.Ordinal);
+            Assert.DoesNotContain("at KeelMatrix", output.ToString(), StringComparison.Ordinal);
+        }
+        finally
+        {
+            root.Delete(true);
+        }
+    }
+
+    [Fact]
+    public async Task InvalidProjectPathReturnsJsonAnalysisEnvelope()
+    {
+        using var output = new StringWriter();
+        using var errors = new StringWriter();
+
+        var exitCode = await CommandRunner.RunAsync(["check", "\0", "--baseline", "baseline.json", "--format", "json", "--no-telemetry"], output, errors);
+
+        Assert.Equal(3, exitCode);
+        Assert.Empty(errors.ToString());
+        Assert.Contains("analysisErrors", output.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("at KeelMatrix", output.ToString(), StringComparison.Ordinal);
     }
 
     private static string FindRepositoryFile(params string[] parts)

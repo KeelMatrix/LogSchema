@@ -10,6 +10,7 @@ namespace KeelMatrix.LogSchema;
 internal sealed class LogSchemaExtractor
 {
     private const string LoggerMessageAttributeName = "Microsoft.Extensions.Logging.LoggerMessageAttribute";
+    internal const string DynamicLevelName = "Dynamic";
     internal const string EmptyEventsIssueCode = "KMLOGP006";
     internal const string EmptyEventsIssueMessage = "No supported [LoggerMessage] declarations were found. The project may genuinely have no [LoggerMessage] declarations, may use an unsupported declaration shape, or may target the wrong framework; for a multi-targeted project, try --tfm.";
     internal const string EmptyBaselineEventsIssueMessage = "The baseline manifest contains zero events. No supported [LoggerMessage] declarations may have been captured because the project genuinely has none, uses an unsupported declaration shape, or targets the wrong framework; for a multi-targeted project, try --tfm.";
@@ -318,9 +319,8 @@ internal sealed class LogSchemaExtractor
             reason = "method has no ILogger parameter";
             return false;
         }
-        if (!TryReadAttribute(attribute, method.Name, out var eventId, out var eventName, out var level, out var message))
+        if (!TryReadAttribute(attribute, method, out var eventId, out var eventName, out var level, out var message, out reason))
         {
-            reason = "attribute arguments are not compile-time constants in the supported LoggerMessage shape";
             return false;
         }
         if (!TryReadPlaceholders(message, out var placeholders, out reason))
@@ -355,29 +355,71 @@ internal sealed class LogSchemaExtractor
         return true;
     }
 
-    private static bool TryReadAttribute(AttributeData attribute, string methodName, out int eventId, out string eventName, out string level, out string message)
+    private static bool TryReadAttribute(AttributeData attribute, IMethodSymbol method, out int eventId, out string eventName, out string level, out string message, out string? reason)
     {
-        eventId = -1;
-        eventName = methodName;
-        level = "None";
+        eventId = 0;
+        eventName = method.Name;
+        level = string.Empty;
         message = string.Empty;
+        reason = null;
+        int? suppliedEventId = null;
+        string? suppliedEventName = null;
+        string? suppliedLevel = null;
+
         foreach (var argument in attribute.ConstructorArguments)
         {
-            if (argument.Type?.Name == "LogLevel") level = EnumName(argument);
-            else if (argument.Type?.SpecialType == SpecialType.System_Int32) eventId = Convert.ToInt32(argument.Value, CultureInfo.InvariantCulture);
+            if (argument.Kind == TypedConstantKind.Error)
+            {
+                reason = "attribute arguments are not compile-time constants in the supported LoggerMessage shape";
+                return false;
+            }
+
+            if (argument.Type?.Name == "LogLevel") suppliedLevel = EnumName(argument);
+            else if (argument.Type?.SpecialType == SpecialType.System_Int32) suppliedEventId = Convert.ToInt32(argument.Value, CultureInfo.InvariantCulture);
             else if (argument.Type?.SpecialType == SpecialType.System_String) message = argument.Value as string ?? string.Empty;
         }
+
         foreach (var (name, argument) in attribute.NamedArguments)
         {
+            if (argument.Kind == TypedConstantKind.Error)
+            {
+                reason = "attribute arguments are not compile-time constants in the supported LoggerMessage shape";
+                return false;
+            }
+
             switch (name)
             {
-                case "EventId" when argument.Type?.SpecialType == SpecialType.System_Int32: eventId = Convert.ToInt32(argument.Value, CultureInfo.InvariantCulture); break;
-                case "EventName" when argument.Type?.SpecialType == SpecialType.System_String: eventName = argument.Value as string ?? methodName; break;
-                case "Level" when argument.Type?.Name == "LogLevel": level = EnumName(argument); break;
+                case "EventId" when argument.Type?.SpecialType == SpecialType.System_Int32: suppliedEventId = Convert.ToInt32(argument.Value, CultureInfo.InvariantCulture); break;
+                case "EventName" when argument.Type?.SpecialType == SpecialType.System_String: suppliedEventName = argument.Value as string; break;
+                case "Level" when argument.Type?.Name == "LogLevel": suppliedLevel = EnumName(argument); break;
                 case "Message" when argument.Type?.SpecialType == SpecialType.System_String: message = argument.Value as string ?? string.Empty; break;
             }
         }
-        return !string.IsNullOrEmpty(message);
+
+        if (string.IsNullOrEmpty(message))
+        {
+            reason = "attribute arguments are not compile-time constants in the supported LoggerMessage shape";
+            return false;
+        }
+
+        eventName = string.IsNullOrWhiteSpace(suppliedEventName) ? method.Name : suppliedEventName;
+        eventId = suppliedEventId ?? GetNonRandomizedHashCode(eventName);
+        if (suppliedLevel is not null)
+        {
+            level = suppliedLevel;
+        }
+        else
+        {
+            if (!method.Parameters.Any(parameter => IsLogLevel(parameter.Type)))
+            {
+                reason = "level was omitted and no LogLevel parameter supplies a dynamic level";
+                return false;
+            }
+
+            level = DynamicLevelName;
+        }
+
+        return true;
     }
 
     private static bool TryReadPlaceholders(string message, out IReadOnlyList<Placeholder> placeholders, out string? reason)
@@ -416,6 +458,18 @@ internal sealed class LogSchemaExtractor
         6 => "None",
         var value => value.ToString(CultureInfo.InvariantCulture)
     };
+
+    private static int GetNonRandomizedHashCode(string value)
+    {
+        uint result = 2166136261u;
+        foreach (var character in value)
+        {
+            result = (character ^ result) * 16777619;
+        }
+
+        var hash = (int)result;
+        return hash == int.MinValue ? 0 : Math.Abs(hash);
+    }
 
     private static bool IsLogger(ITypeSymbol type) => type.Name == "ILogger" && type.ContainingNamespace.ToDisplayString() == "Microsoft.Extensions.Logging";
     private static bool IsLogLevel(ITypeSymbol type) => type.Name == "LogLevel" && type.ContainingNamespace.ToDisplayString() == "Microsoft.Extensions.Logging";

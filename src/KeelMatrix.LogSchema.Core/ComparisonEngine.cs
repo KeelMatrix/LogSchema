@@ -37,6 +37,9 @@ internal enum SeverityGate
 
 internal static class ComparisonEngine
 {
+    internal const string IncompleteCoverageIssueCode = "KMLOGP007";
+    internal const string IncompleteCoverageIssueMessage = "The manifest contains unsupported declarations; comparison coverage is incomplete.";
+
     internal static ComparisonReport Compare(ManifestDocument oldManifest, ManifestDocument newManifest, SeverityGate gate, IReadOnlySet<string> acceptedCodes, bool rejectEmptyEventSets = false)
     {
         var oldEvents = oldManifest.Events.ToDictionary(EventKey, StringComparer.Ordinal);
@@ -68,10 +71,17 @@ internal static class ComparisonEngine
             .ThenBy(finding => finding.Code, StringComparer.Ordinal)
             .ThenBy(finding => finding.Field, StringComparer.Ordinal)
             .ToArray();
-        var analysisErrors = newManifest.AnalysisIssues
+        var analysisErrors = oldManifest.AnalysisIssues
             .Where(issue => string.Equals(issue.Severity, "error", StringComparison.OrdinalIgnoreCase))
             .Select(issue => issue.Code + ": " + issue.Message)
+            .Concat(newManifest.AnalysisIssues
+            .Where(issue => string.Equals(issue.Severity, "error", StringComparison.OrdinalIgnoreCase))
+            .Select(issue => issue.Code + ": " + issue.Message))
             .ToList();
+        if (oldManifest.Unsupported.Count > 0 || newManifest.Unsupported.Count > 0)
+        {
+            analysisErrors.Add(IncompleteCoverageIssueCode + ": " + IncompleteCoverageIssueMessage);
+        }
         if (rejectEmptyEventSets && oldManifest.Events.Count == 0)
         {
             analysisErrors.Add(LogSchemaExtractor.EmptyEventsIssueCode + ": " + LogSchemaExtractor.EmptyBaselineEventsIssueMessage);
@@ -98,30 +108,28 @@ internal static class ComparisonEngine
 
         var oldNames = oldEvent.Placeholders.Select(p => p.Name).ToArray();
         var newNames = newEvent.Placeholders.Select(p => p.Name).ToArray();
-        var oldSet = oldNames.ToHashSet(StringComparer.Ordinal);
-        var newSet = newNames.ToHashSet(StringComparer.Ordinal);
-        if (oldNames.Length == newNames.Length && oldSet.SetEquals(newSet) && !oldNames.SequenceEqual(newNames, StringComparer.Ordinal))
+        var retainedOldNames = RetainedOccurrences(oldNames, newNames);
+        var retainedNewNames = RetainedOccurrences(newNames, oldNames);
+        if (!retainedOldNames.SequenceEqual(retainedNewNames, StringComparer.Ordinal))
         {
-            findings.Add(Find("KMLOG103", FindingSeverity.Breaking, newEvent, "placeholders", string.Join(", ", oldNames), string.Join(", ", newNames), $"{Display(newEvent)} changed structured placeholder order."));
+            findings.Add(Find("KMLOG103", FindingSeverity.Breaking, newEvent, "placeholders", string.Join(", ", retainedOldNames), string.Join(", ", retainedNewNames), $"{Display(newEvent)} changed structured placeholder order."));
+        }
+
+        var removed = DifferenceByOccurrence(oldNames, newNames);
+        var added = DifferenceByOccurrence(newNames, oldNames);
+        if (removed.Count == 1 && added.Count == 1)
+        {
+            findings.Add(Find("KMLOG102", FindingSeverity.Breaking, newEvent, "placeholder", removed[0], added[0], $"{Display(newEvent)} changed structured property \"{removed[0]}\" to \"{added[0]}\"."));
         }
         else
         {
-            var removed = oldNames.Where(name => !newSet.Contains(name)).ToArray();
-            var added = newNames.Where(name => !oldSet.Contains(name)).ToArray();
-            if (removed.Length == 1 && added.Length == 1)
+            foreach (var name in removed.Order(StringComparer.Ordinal))
             {
-                findings.Add(Find("KMLOG102", FindingSeverity.Breaking, newEvent, "placeholder", removed[0], added[0], $"{Display(newEvent)} changed structured property \"{removed[0]}\" to \"{added[0]}\"."));
+                findings.Add(Find("KMLOG101", FindingSeverity.Breaking, newEvent, "placeholder", name, null, $"{Display(newEvent)} removed structured property \"{name}\"."));
             }
-            else
+            foreach (var name in added.Order(StringComparer.Ordinal))
             {
-                foreach (var name in removed.Order(StringComparer.Ordinal))
-                {
-                    findings.Add(Find("KMLOG101", FindingSeverity.Breaking, newEvent, "placeholder", name, null, $"{Display(newEvent)} removed structured property \"{name}\"."));
-                }
-                foreach (var name in added.Order(StringComparer.Ordinal))
-                {
-                    findings.Add(Find("KMLOG104", FindingSeverity.Info, newEvent, "placeholder", null, name, $"{Display(newEvent)} added structured property \"{name}\"."));
-                }
+                findings.Add(Find("KMLOG104", FindingSeverity.Info, newEvent, "placeholder", null, name, $"{Display(newEvent)} added structured property \"{name}\"."));
             }
         }
 
@@ -134,4 +142,44 @@ internal static class ComparisonEngine
     private static CompatibilityFinding Find(string code, FindingSeverity severity, EventContract @event, string field, string? oldValue, string? newValue, string message) => new(code, severity, @event.ProjectKey, @event.Identity, @event.EventName, field, oldValue, newValue, message);
     private static string EventKey(EventContract @event) => @event.ProjectKey + "\u001f" + @event.Identity;
     private static string Display(EventContract @event) => string.IsNullOrWhiteSpace(@event.EventName) ? @event.Method : @event.EventName;
+
+    private static List<string> RetainedOccurrences(IReadOnlyList<string> names, IReadOnlyList<string> otherNames)
+    {
+        var limits = otherNames.GroupBy(name => name, StringComparer.Ordinal).ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal);
+        var seen = new Dictionary<string, int>(StringComparer.Ordinal);
+        var retained = new List<string>();
+        foreach (var name in names)
+        {
+            seen.TryGetValue(name, out var count);
+            if (limits.TryGetValue(name, out var limit) && count < limit)
+            {
+                retained.Add(name);
+                seen[name] = count + 1;
+            }
+        }
+
+        return retained;
+    }
+
+    private static List<string> DifferenceByOccurrence(IReadOnlyList<string> names, IReadOnlyList<string> otherNames)
+    {
+        var retained = RetainedOccurrences(names, otherNames);
+        var retainedCounts = retained.GroupBy(name => name, StringComparer.Ordinal).ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal);
+        var seen = new Dictionary<string, int>(StringComparer.Ordinal);
+        var difference = new List<string>();
+        foreach (var name in names)
+        {
+            seen.TryGetValue(name, out var count);
+            if (!retainedCounts.TryGetValue(name, out var retainedCount) || count >= retainedCount)
+            {
+                difference.Add(name);
+            }
+            else
+            {
+                seen[name] = count + 1;
+            }
+        }
+
+        return difference;
+    }
 }

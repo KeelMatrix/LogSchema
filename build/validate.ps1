@@ -490,10 +490,32 @@ Invoke-Timed 'Isolated packed-tool consumer smoke' {
 
         $capture = Invoke-SmokeStep -Label 'capture' -ToolCommand $toolCommandPath -Arguments @('capture', $consumerProject, '--output', $baseline, '--no-telemetry')
         Assert-That ($capture.ExitCode -eq 0 -and (Test-Path -LiteralPath $baseline)) 'consumer capture must return exit 0 and write a manifest'
+        $capturedManifest = Get-Content -Raw -LiteralPath $baseline | ConvertFrom-Json
+        $omittedEvent = @($capturedManifest.events | Where-Object { $_.method -eq 'OmittedEventId' })
+        Assert-That ($omittedEvent.Count -eq 1 -and $omittedEvent[0].eventId -ne 0 -and $omittedEvent[0].eventName -eq 'OmittedEventId' -and $omittedEvent[0].level -eq 'Information') 'installed capture must record generator-derived EventId, default EventName, and fixed level'
+        $dynamicEvent = @($capturedManifest.events | Where-Object { $_.method -eq 'DynamicLevel' })
+        Assert-That ($dynamicEvent.Count -eq 1 -and $dynamicEvent[0].level -eq 'Dynamic') 'installed capture must distinguish a dynamic LogLevel parameter from fixed None'
+        $fixedNoneEvent = @($capturedManifest.events | Where-Object { $_.method -eq 'FixedNone' })
+        Assert-That ($fixedNoneEvent.Count -eq 1 -and $fixedNoneEvent[0].level -eq 'None') 'installed capture must preserve explicit LogLevel.None'
 
         $clean = Invoke-SmokeStep -Label 'clean check' -ToolCommand $toolCommandPath -Arguments @('check', $consumerProject, '--baseline', $baseline, '--no-telemetry')
         Assert-That ($clean.ExitCode -eq 0) 'clean consumer check must return exit 0'
         Assert-That ($clean.Output -match 'LogSchema: no gated incompatibilities found\.') 'clean check must report no gated incompatibilities'
+
+        $incompleteBaseline = Join-Path $smokeRoot 'consumer-incomplete.json'
+        $incompleteManifest = Get-Content -Raw -LiteralPath $baseline | ConvertFrom-Json
+        $incompleteManifest.unsupported = @([pscustomobject]@{
+                projectKey = [string]$incompleteManifest.projects[0].key
+                source = [pscustomobject]@{ file = 'ConsumerLogging.cs'; line = 1; kind = 'source' }
+                declaration = 'unsupported declaration'
+                declarationKey = 'PackageConsumerFixture.Unsupported'
+                reason = 'unsupported form'
+            })
+        $incompleteManifest | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $incompleteBaseline -Encoding utf8NoBOM
+        $unsupportedCheck = Invoke-SmokeStep -Label 'unsupported coverage check' -ToolCommand $toolCommandPath -Arguments @('check', $consumerProject, '--baseline', $incompleteBaseline, '--format', 'json', '--no-telemetry')
+        Assert-That ($unsupportedCheck.ExitCode -eq 3 -and $unsupportedCheck.Output -match 'KMLOGP007' -and $unsupportedCheck.Output -match 'PackageConsumerFixture\.Unsupported' -and $unsupportedCheck.Output -match 'unsupported form') 'installed check must gate and explain unsupported baseline coverage'
+        $unsupportedDiff = Invoke-SmokeStep -Label 'unsupported coverage diff' -ToolCommand $toolCommandPath -Arguments @('diff', $baseline, $incompleteBaseline, '--format', 'json', '--no-telemetry')
+        Assert-That ($unsupportedDiff.ExitCode -eq 3 -and $unsupportedDiff.Output -match 'KMLOGP007' -and $unsupportedDiff.Output -match 'PackageConsumerFixture\.Unsupported') 'installed diff must gate and explain unsupported coverage'
 
         $sourcePath = Join-Path $consumerRoot 'ConsumerLogging.cs'
         $source = Get-Content -Raw -LiteralPath $sourcePath
@@ -503,6 +525,12 @@ Invoke-Timed 'Isolated packed-tool consumer smoke' {
         $expectedDiagnostic = 'BREAKING KMLOG102 ConsumerProcessed changed structured property "OrderId" to "AccountId".'
         Assert-That ($mutated.ExitCode -eq 1) 'mutated consumer check must return exit 1'
         Assert-That ($mutated.Output.Contains($expectedDiagnostic)) "mutated check must contain the exact diagnostic: $expectedDiagnostic"
+
+        $source = Get-Content -Raw -LiteralPath $sourcePath
+        $source = $source.Replace('Processed {AccountId}', 'Processed {OrderId}').Replace('int accountId', 'int orderId').Replace('[LoggerMessage(Message = "Dynamic level {Value}")]', '[LoggerMessage(Level = LogLevel.None, Message = "Dynamic level {Value}")]')
+        Set-Content -LiteralPath $sourcePath -Value $source -Encoding utf8
+        $levelMutation = Invoke-SmokeStep -Label 'dynamic-to-fixed level check' -ToolCommand $toolCommandPath -Arguments @('check', $consumerProject, '--baseline', $baseline, '--severity', 'warning', '--no-telemetry')
+        Assert-That ($levelMutation.ExitCode -eq 1 -and $levelMutation.Output -match 'WARNING\s+KMLOG201 DynamicLevel changed level Dynamic -> None\.') 'installed check must report a dynamic-to-fixed level transition'
 
         $invalid = Invoke-SmokeStep -Label 'invalid configuration' -ToolCommand $toolCommandPath -Arguments @('check', $consumerProject, '--baseline', $baseline, '--severity', 'invalid', '--no-telemetry')
         Assert-That ($invalid.ExitCode -eq 2) 'invalid severity configuration must return documented exit 2'

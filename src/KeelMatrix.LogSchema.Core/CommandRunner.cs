@@ -22,7 +22,7 @@ internal sealed class CommandRunner
         }
         catch (InvocationException exception)
         {
-            parsed = new ParsedArguments(null, [], exception.Message, OutputFormat.Text, SeverityGate.Breaking, new HashSet<string>(StringComparer.Ordinal), null, null, null);
+            parsed = new ParsedArguments(null, [], exception.Message, DetectRequestedFormat(args), SeverityGate.Breaking, new HashSet<string>(StringComparer.Ordinal), null, null, null);
         }
         if (parsed.ShowHelp)
         {
@@ -53,6 +53,14 @@ internal sealed class CommandRunner
         {
             return await WriteErrorAsync(parsed, exception.Message, 3, stdout, stderr, analysisError: true);
         }
+        catch (ManifestWriteException exception)
+        {
+            return await WriteErrorAsync(parsed, exception.Message, 3, stdout, stderr, analysisError: true);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException or System.Security.SecurityException)
+        {
+            return await WriteErrorAsync(parsed, "The project or solution could not be read.", 3, stdout, stderr, analysisError: true);
+        }
         catch (OperationCanceledException)
         {
             return await WriteErrorAsync(parsed, "Analysis was cancelled.", 3, stdout, stderr, analysisError: true);
@@ -68,7 +76,7 @@ internal sealed class CommandRunner
             await ManifestJson.WriteAsync(manifest, parsed.OutputPath!, cancellationToken);
         }
 
-        var envelope = new CommandEnvelope(Array.Empty<string>(), errors, Array.Empty<CompatibilityFinding>(), errors.Length == 0 ? Path.GetFileName(parsed.OutputPath) : null, manifest.Events.Count, manifest.Unsupported.Count);
+        var envelope = new CommandEnvelope(Array.Empty<string>(), errors, Array.Empty<CompatibilityFinding>(), errors.Length == 0 ? Path.GetFileName(parsed.OutputPath) : null, manifest.Events.Count, manifest.Unsupported.Count, manifest.Unsupported, manifest.Unsupported.Count == 0);
         await WriteEnvelopeAsync(parsed, envelope, stdout, stderr, errors.Length > 0 ? 3 : 0);
         return errors.Length > 0 ? 3 : 0;
     }
@@ -78,7 +86,8 @@ internal sealed class CommandRunner
         var current = await LogSchemaExtractor.ExtractAsync(parsed.Positionals[0], parsed.TargetFramework, cancellationToken);
         var baseline = await ManifestJson.ReadAsync(parsed.BaselinePath!, cancellationToken);
         var report = ComparisonEngine.Compare(baseline, current, parsed.Gate, parsed.AcceptedCodes, rejectEmptyEventSets: true);
-        var envelope = new CommandEnvelope(Array.Empty<string>(), report.AnalysisErrors, report.Findings, null, current.Events.Count, current.Unsupported.Count);
+        var unsupported = baseline.Unsupported.Concat(current.Unsupported).Distinct().ToArray();
+        var envelope = new CommandEnvelope(Array.Empty<string>(), report.AnalysisErrors, report.Findings, null, current.Events.Count, unsupported.Length, unsupported, unsupported.Length == 0);
         var exitCode = report.AnalysisErrors.Count > 0 ? 3 : report.HasGatedFindings(parsed.Gate) ? 1 : 0;
         await WriteEnvelopeAsync(parsed, envelope, stdout, stderr, exitCode);
         return exitCode;
@@ -89,7 +98,8 @@ internal sealed class CommandRunner
         var oldManifest = await ManifestJson.ReadAsync(parsed.Positionals[0], cancellationToken);
         var newManifest = await ManifestJson.ReadAsync(parsed.Positionals[1], cancellationToken);
         var report = ComparisonEngine.Compare(oldManifest, newManifest, parsed.Gate, parsed.AcceptedCodes);
-        var envelope = new CommandEnvelope(Array.Empty<string>(), report.AnalysisErrors, report.Findings, null, newManifest.Events.Count, newManifest.Unsupported.Count);
+        var unsupported = oldManifest.Unsupported.Concat(newManifest.Unsupported).Distinct().ToArray();
+        var envelope = new CommandEnvelope(Array.Empty<string>(), report.AnalysisErrors, report.Findings, null, newManifest.Events.Count, unsupported.Length, unsupported, unsupported.Length == 0);
         var exitCode = report.AnalysisErrors.Count > 0 ? 3 : report.HasGatedFindings(parsed.Gate) ? 1 : 0;
         await WriteEnvelopeAsync(parsed, envelope, stdout, stderr, exitCode);
         return exitCode;
@@ -98,8 +108,8 @@ internal sealed class CommandRunner
     private static async Task<int> WriteErrorAsync(ParsedArguments parsed, string message, int exitCode, TextWriter stdout, TextWriter stderr, bool analysisError = false)
     {
         var envelope = analysisError
-            ? new CommandEnvelope(Array.Empty<string>(), [message], Array.Empty<CompatibilityFinding>(), null, null, null)
-            : new CommandEnvelope([message], Array.Empty<string>(), Array.Empty<CompatibilityFinding>(), null, null, null);
+            ? new CommandEnvelope(Array.Empty<string>(), [message], Array.Empty<CompatibilityFinding>(), null, null, null, Array.Empty<UnsupportedDeclaration>(), false)
+            : new CommandEnvelope([message], Array.Empty<string>(), Array.Empty<CompatibilityFinding>(), null, null, null, Array.Empty<UnsupportedDeclaration>(), false);
         await WriteEnvelopeAsync(parsed, envelope, stdout, stderr, exitCode);
         return exitCode;
     }
@@ -125,7 +135,7 @@ internal sealed class CommandRunner
             var accepted = finding.Accepted ? " ACCEPTED" : string.Empty;
             await stdout.WriteLineAsync($"{SeverityText(finding.Severity),-8} {finding.Code} {finding.Message}{accepted}");
         }
-        if (envelope.Findings.Count == 0 && envelope.ToolErrors.Count == 0 && envelope.AnalysisErrors.Count == 0)
+        if (envelope.Findings.Count == 0 && envelope.ToolErrors.Count == 0 && envelope.AnalysisErrors.Count == 0 && envelope.CoverageComplete)
         {
             await stdout.WriteLineAsync("LogSchema: no gated incompatibilities found.");
         }
@@ -137,6 +147,14 @@ internal sealed class CommandRunner
         {
             await stdout.WriteLineAsync($"Wrote canonical manifest: {envelope.ManifestPath}");
             await stdout.WriteLineAsync($"Unsupported declarations: {envelope.UnsupportedCount}");
+        }
+        if (envelope.Unsupported.Count > 0)
+        {
+            foreach (var item in envelope.Unsupported)
+            {
+                await stdout.WriteLineAsync($"UNSUPPORTED {item.ProjectKey} {item.DeclarationKey}: {item.Reason}");
+            }
+            await stdout.WriteLineAsync("Coverage: incomplete; unsupported declarations prevent a complete comparison.");
         }
         if (exitCode == 1)
         {
@@ -154,9 +172,9 @@ internal sealed class CommandRunner
     private static ParsedArguments Parse(string[] args)
     {
         if (args.Any(argument => argument is "--help" or "-h")) return ParsedArguments.Help;
-        if (args.Length == 0) return new(null, [], "A command is required. Use --help for usage.", OutputFormat.Text, SeverityGate.Breaking, new HashSet<string>(StringComparer.Ordinal), null, null, null);
+        if (args.Length == 0) return new(null, [], "A command is required. Use --help for usage.", DetectRequestedFormat(args), SeverityGate.Breaking, new HashSet<string>(StringComparer.Ordinal), null, null, null);
         var command = args[0].ToLowerInvariant();
-        if (command is not ("capture" or "check" or "diff")) return new(command, [], "Unknown command. Use --help for usage.", OutputFormat.Text, SeverityGate.Breaking, new HashSet<string>(StringComparer.Ordinal), null, null, null);
+        if (command is not ("capture" or "check" or "diff")) return new(command, [], "Unknown command. Use --help for usage.", DetectRequestedFormat(args), SeverityGate.Breaking, new HashSet<string>(StringComparer.Ordinal), null, null, null);
 
         var positional = new List<string>();
         var accepts = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -185,7 +203,9 @@ internal sealed class CommandRunner
                     break;
                 case "--format":
                     var formatValue = NextValue(args, ref index, argument);
-                    if (!Enum.TryParse<OutputFormat>(formatValue, true, out format)) return Invalid(command, "--format must be text or json.", format, gate);
+                    if (formatValue.Equals("text", StringComparison.OrdinalIgnoreCase)) format = OutputFormat.Text;
+                    else if (formatValue.Equals("json", StringComparison.OrdinalIgnoreCase)) format = OutputFormat.Json;
+                    else return Invalid(command, "--format must be text or json.", format, gate);
                     break;
                 case "--severity":
                     var severityValue = NextValue(args, ref index, argument);
@@ -222,6 +242,19 @@ internal sealed class CommandRunner
 
     private static ParsedArguments Invalid(string command, string error, OutputFormat format = OutputFormat.Text, SeverityGate gate = SeverityGate.Breaking) => new(command, [], error, format, gate, new HashSet<string>(StringComparer.Ordinal), null, null, null);
 
+    private static OutputFormat DetectRequestedFormat(string[] args)
+    {
+        for (var index = 0; index < args.Length - 1; index++)
+        {
+            if (args[index].Equals("--format", StringComparison.Ordinal) && args[index + 1].Equals("json", StringComparison.OrdinalIgnoreCase))
+            {
+                return OutputFormat.Json;
+            }
+        }
+
+        return OutputFormat.Text;
+    }
+
     private static string NextValue(string[] args, ref int index, string option)
     {
         if (++index >= args.Length || args[index].StartsWith("--", StringComparison.Ordinal)) throw new InvocationException(option + " requires a value.");
@@ -243,7 +276,9 @@ internal sealed record CommandEnvelope(
     [property: JsonPropertyName("findings")] IReadOnlyList<CompatibilityFinding> Findings,
     [property: JsonPropertyName("manifestPath")] string? ManifestPath,
     [property: JsonPropertyName("eventCount")] int? EventCount,
-    [property: JsonPropertyName("unsupportedCount")] int? UnsupportedCount);
+    [property: JsonPropertyName("unsupportedCount")] int? UnsupportedCount,
+    [property: JsonPropertyName("unsupported")] IReadOnlyList<UnsupportedDeclaration> Unsupported,
+    [property: JsonPropertyName("coverageComplete")] bool CoverageComplete);
 
 internal sealed class InvocationException(string message) : Exception(message);
 

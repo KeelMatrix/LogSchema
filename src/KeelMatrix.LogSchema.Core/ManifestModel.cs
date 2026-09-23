@@ -1,3 +1,4 @@
+using System.Security;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -102,124 +103,410 @@ internal static class ManifestJson
 
     internal static async Task WriteAsync(ManifestDocument manifest, string path, CancellationToken cancellationToken)
     {
-        var json = JsonSerializer.Serialize(manifest.Canonicalize(), Options);
-        json = json.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n') + "\n";
-        var directory = Path.GetDirectoryName(Path.GetFullPath(path));
-        if (directory is not null)
+        string? temporaryPath = null;
+        try
         {
-            Directory.CreateDirectory(directory);
-        }
+            Validate(manifest);
+            var canonical = manifest.Canonicalize();
+            Validate(canonical);
+            var json = JsonSerializer.Serialize(canonical, Options)
+                .Replace("\r\n", "\n", StringComparison.Ordinal)
+                .Replace('\r', '\n') + "\n";
+            var bytes = new UTF8Encoding(false).GetBytes(json);
+            if (bytes.Length > MaxBytes)
+            {
+                throw new ManifestWriteException("The manifest exceeds the 4 MiB safety limit.");
+            }
 
-        await File.WriteAllTextAsync(path, json, new UTF8Encoding(false), cancellationToken);
+            _ = DeserializeAndValidate(bytes);
+
+            var fullPath = Path.GetFullPath(path);
+            var directory = Path.GetDirectoryName(fullPath);
+            if (directory is null)
+            {
+                throw new ManifestWriteException("The manifest output destination is invalid.");
+            }
+
+            Directory.CreateDirectory(directory);
+            temporaryPath = Path.Combine(directory, "." + Path.GetFileName(fullPath) + "." + Guid.NewGuid().ToString("N") + ".tmp");
+            await using (var stream = new FileStream(temporaryPath, FileMode.CreateNew, FileAccess.Write, FileShare.None, 64 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan))
+            {
+                await stream.WriteAsync(bytes, cancellationToken);
+                await stream.FlushAsync(cancellationToken);
+                stream.Flush(flushToDisk: true);
+            }
+
+            File.Move(temporaryPath, fullPath, overwrite: true);
+            temporaryPath = null;
+        }
+        catch (ManifestWriteException)
+        {
+            throw;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (ManifestValidationException)
+        {
+            throw new ManifestWriteException("The manifest could not be validated for writing.");
+        }
+        catch (JsonException)
+        {
+            throw new ManifestWriteException("The manifest could not be validated for writing.");
+        }
+        catch (OverflowException)
+        {
+            throw new ManifestWriteException("The manifest could not be validated for writing.");
+        }
+        catch (InvalidOperationException)
+        {
+            throw new ManifestWriteException("The manifest could not be validated for writing.");
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException or SecurityException)
+        {
+            throw new ManifestWriteException("The manifest could not be written.");
+        }
+        finally
+        {
+            if (temporaryPath is not null)
+            {
+                try
+                {
+                    File.Delete(temporaryPath);
+                }
+                catch (IOException)
+                {
+                }
+                catch (UnauthorizedAccessException)
+                {
+                }
+            }
+        }
     }
 
     internal static async Task<ManifestDocument> ReadAsync(string path, CancellationToken cancellationToken)
     {
-        if (!File.Exists(path))
+        string fullPath;
+        FileInfo info;
+        try
         {
-            throw new ManifestReadException("The manifest file was not found.");
+            fullPath = Path.GetFullPath(path);
+            if (!File.Exists(fullPath))
+            {
+                throw new ManifestReadException("The manifest file was not found.");
+            }
+
+            info = new FileInfo(fullPath);
+        }
+        catch (ManifestReadException)
+        {
+            throw;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException or SecurityException)
+        {
+            throw new ManifestReadException("The manifest could not be read.");
         }
 
-        var info = new FileInfo(path);
         if (info.Length > MaxBytes)
         {
             throw new ManifestReadException("The manifest exceeds the 4 MiB safety limit.");
         }
 
         byte[] bytes;
-        await using (var stream = File.OpenRead(path))
-        {
-            bytes = new byte[(int)info.Length];
-            var read = await stream.ReadAsync(bytes, cancellationToken);
-            if (read != bytes.Length)
-            {
-                throw new ManifestReadException("The manifest could not be read completely.");
-            }
-        }
-
         try
         {
-            using var document = JsonDocument.Parse(bytes, new JsonDocumentOptions { MaxDepth = 32, AllowTrailingCommas = false, CommentHandling = JsonCommentHandling.Disallow });
-            if (!document.RootElement.TryGetProperty("schemaVersion", out var schemaVersion) || schemaVersion.ValueKind != JsonValueKind.Number || schemaVersion.GetInt32() != 1)
+            await using var stream = new FileStream(fullPath, FileMode.Open, FileAccess.Read, FileShare.Read, 64 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan);
+            if (stream.Length > MaxBytes)
             {
-                throw new ManifestReadException("The manifest schemaVersion is unsupported; only schemaVersion 1 is accepted.");
+                throw new ManifestReadException("The manifest exceeds the 4 MiB safety limit.");
             }
 
-            var manifest = JsonSerializer.Deserialize<ManifestDocument>(bytes, Options)
-                ?? throw new ManifestReadException("The manifest is empty.");
-            Validate(manifest);
-            return manifest.Canonicalize();
+            bytes = new byte[(int)stream.Length];
+            await stream.ReadExactlyAsync(bytes, cancellationToken);
         }
         catch (ManifestReadException)
         {
             throw;
         }
-        catch (Exception exception) when (exception is JsonException or OverflowException or InvalidOperationException)
+        catch (OperationCanceledException)
         {
-            throw new ManifestReadException($"The manifest is malformed: {exception.Message}");
+            throw;
+        }
+        catch (EndOfStreamException)
+        {
+            throw new ManifestReadException("The manifest could not be read completely.");
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException or SecurityException)
+        {
+            throw new ManifestReadException("The manifest could not be read.");
+        }
+
+        try
+        {
+            return DeserializeAndValidate(bytes).Canonicalize();
+        }
+        catch (ManifestValidationException exception)
+        {
+            throw new ManifestReadException(exception.Message);
+        }
+        catch (JsonException)
+        {
+            throw new ManifestReadException("The manifest is malformed.");
+        }
+        catch (OverflowException)
+        {
+            throw new ManifestReadException("The manifest is malformed.");
+        }
+        catch (InvalidOperationException)
+        {
+            throw new ManifestReadException("The manifest is malformed.");
+        }
+    }
+
+    private static ManifestDocument DeserializeAndValidate(byte[] bytes)
+    {
+        using var document = JsonDocument.Parse(bytes, new JsonDocumentOptions { MaxDepth = 32, AllowTrailingCommas = false, CommentHandling = JsonCommentHandling.Disallow });
+        ValidateJsonShape(document.RootElement);
+        var manifest = JsonSerializer.Deserialize<ManifestDocument>(bytes, Options)
+            ?? throw new ManifestValidationException("The manifest is empty.");
+        Validate(manifest);
+        return manifest;
+    }
+
+    private static void ValidateJsonShape(JsonElement root)
+    {
+        if (root.ValueKind != JsonValueKind.Object)
+        {
+            throw new ManifestValidationException("The manifest root must be an object.");
+        }
+
+        _ = RequiredInteger(root, "schemaVersion");
+        foreach (var name in new[] { "projects", "events", "unsupported", "analysisIssues", "compilationDiagnosticKinds", "workspaceDiagnosticKinds" })
+        {
+            _ = RequiredArray(root, name);
+        }
+
+        foreach (var project in RequiredArray(root, "projects").EnumerateArray())
+        {
+            RequireObject(project, "projects");
+            RequireString(project, "key");
+            RequireString(project, "name");
+            RequireString(project, "assembly");
+            RequireString(project, "targetFramework");
+        }
+
+        foreach (var @event in RequiredArray(root, "events").EnumerateArray())
+        {
+            RequireObject(@event, "events");
+            RequireString(@event, "projectKey");
+            RequireString(@event, "identity");
+            RequireString(@event, "containingType");
+            RequireString(@event, "method");
+            _ = RequiredInteger(@event, "genericArity");
+            RequireStringArray(@event, "parameterRefKinds");
+            _ = RequiredInteger(@event, "eventId");
+            RequireString(@event, "eventName");
+            RequireString(@event, "level");
+            RequireString(@event, "message");
+            foreach (var placeholder in RequiredArray(@event, "placeholders").EnumerateArray())
+            {
+                RequireObject(placeholder, "placeholders");
+                RequireString(placeholder, "name");
+                RequireString(placeholder, "token");
+            }
+            RequireStringArray(@event, "parameterForms");
+            ValidateJsonSource(@event, "source");
+        }
+
+        foreach (var item in RequiredArray(root, "unsupported").EnumerateArray())
+        {
+            RequireObject(item, "unsupported");
+            RequireString(item, "projectKey");
+            ValidateJsonSource(item, "source");
+            RequireString(item, "declaration");
+            RequireString(item, "declarationKey");
+            RequireString(item, "reason");
+        }
+
+        foreach (var issue in RequiredArray(root, "analysisIssues").EnumerateArray())
+        {
+            RequireObject(issue, "analysisIssues");
+            RequireString(issue, "projectKey");
+            RequireString(issue, "code");
+            RequireString(issue, "severity");
+            RequireString(issue, "message");
+            RequireString(issue, "declarationKey");
+            foreach (var source in RequiredArray(issue, "sources").EnumerateArray())
+            {
+                if (source.ValueKind != JsonValueKind.Object)
+                {
+                    throw new ManifestValidationException("A manifest source record must be an object.");
+                }
+                RequireString(source, "file");
+                _ = RequiredInteger(source, "line");
+                RequireString(source, "kind");
+            }
+        }
+
+        RequireStringArray(root, "compilationDiagnosticKinds");
+        RequireStringArray(root, "workspaceDiagnosticKinds");
+    }
+
+    private static JsonElement RequiredArray(JsonElement parent, string name)
+    {
+        if (!parent.TryGetProperty(name, out var value) || value.ValueKind != JsonValueKind.Array)
+        {
+            throw new ManifestValidationException($"The manifest field '{name}' is required and must be an array.");
+        }
+
+        return value;
+    }
+
+    private static int RequiredInteger(JsonElement parent, string name)
+    {
+        if (!parent.TryGetProperty(name, out var value) || value.ValueKind != JsonValueKind.Number || value.GetRawText().IndexOfAny(['.', 'e', 'E']) >= 0 || !value.TryGetInt32(out var integer))
+        {
+            throw new ManifestValidationException($"The manifest field '{name}' is required and must be an integer.");
+        }
+
+        return integer;
+    }
+
+    private static void RequireObject(JsonElement value, string collection)
+    {
+        if (value.ValueKind != JsonValueKind.Object)
+        {
+            throw new ManifestValidationException($"Manifest elements in '{collection}' must be objects.");
+        }
+    }
+
+    private static void RequireString(JsonElement parent, string name)
+    {
+        if (!parent.TryGetProperty(name, out var value) || value.ValueKind != JsonValueKind.String)
+        {
+            throw new ManifestValidationException($"The manifest field '{name}' is required and must be a string.");
+        }
+    }
+
+    private static void RequireStringArray(JsonElement parent, string name)
+    {
+        foreach (var value in RequiredArray(parent, name).EnumerateArray())
+        {
+            if (value.ValueKind != JsonValueKind.String)
+            {
+                throw new ManifestValidationException($"Manifest elements in '{name}' must be strings.");
+            }
         }
     }
 
     private static void Validate(ManifestDocument manifest)
     {
-        if (manifest.SchemaVersion != 1 || manifest.Projects is null || manifest.Events is null || manifest.Unsupported is null || manifest.AnalysisIssues is null)
+        if (manifest.SchemaVersion != 1)
         {
-            throw new ManifestReadException("The manifest is missing required schema v1 fields.");
+            throw new ManifestValidationException("The manifest schemaVersion is unsupported; only schemaVersion 1 is accepted.");
         }
 
-        if (manifest.Projects.Count > MaxItems || manifest.Events.Count > MaxItems || manifest.Unsupported.Count > MaxItems || manifest.AnalysisIssues.Count > MaxItems)
+        if (manifest.Projects is null || manifest.Events is null || manifest.Unsupported is null || manifest.AnalysisIssues is null || manifest.CompilationDiagnosticKinds is null || manifest.WorkspaceDiagnosticKinds is null)
         {
-            throw new ManifestReadException("The manifest contains more records than the safety limit permits.");
+            throw new ManifestValidationException("The manifest is missing required schema v1 fields.");
         }
 
-        if (manifest.Projects.GroupBy(project => project.Key, StringComparer.Ordinal).Any(group => group.Count() > 1) ||
-            manifest.Events.GroupBy(@event => @event.ProjectKey + "\u001f" + @event.Identity, StringComparer.Ordinal).Any(group => group.Count() > 1))
+        if (manifest.Projects.Count > MaxItems || manifest.Events.Count > MaxItems || manifest.Unsupported.Count > MaxItems || manifest.AnalysisIssues.Count > MaxItems || manifest.CompilationDiagnosticKinds.Count > MaxItems || manifest.WorkspaceDiagnosticKinds.Count > MaxItems)
         {
-            throw new ManifestReadException("The manifest contains duplicate or ambiguous canonical identities.");
+            throw new ManifestValidationException("The manifest contains more records than the safety limit permits.");
         }
 
+        if (manifest.Projects.Any(project => project is null) || manifest.Events.Any(@event => @event is null) || manifest.Unsupported.Any(item => item is null) || manifest.AnalysisIssues.Any(issue => issue is null))
+        {
+            throw new ManifestValidationException("The manifest contains null records.");
+        }
+
+        var projectKeys = new HashSet<string>(StringComparer.Ordinal);
         foreach (var project in manifest.Projects)
         {
-            if (string.IsNullOrWhiteSpace(project.Key) || string.IsNullOrWhiteSpace(project.Assembly))
+            if (string.IsNullOrWhiteSpace(project.Key) || string.IsNullOrWhiteSpace(project.Name) || string.IsNullOrWhiteSpace(project.Assembly) || string.IsNullOrWhiteSpace(project.TargetFramework) || !string.Equals(project.Key, project.Assembly + "|" + project.TargetFramework, StringComparison.Ordinal) || !projectKeys.Add(project.Key))
             {
-                throw new ManifestReadException("A manifest project identity is incomplete.");
+                throw new ManifestValidationException("A manifest project identity is incomplete or ambiguous.");
             }
         }
 
+        var eventKeys = new HashSet<string>(StringComparer.Ordinal);
         foreach (var @event in manifest.Events)
         {
-            if (@event.Placeholders is null || @event.Placeholders.Count > MaxItems || string.IsNullOrWhiteSpace(@event.Identity))
+            if (string.IsNullOrWhiteSpace(@event.ProjectKey) || !projectKeys.Contains(@event.ProjectKey) || string.IsNullOrWhiteSpace(@event.Identity) || @event.Identity.Contains("global::", StringComparison.Ordinal) || !eventKeys.Add(@event.ProjectKey + "\u001f" + @event.Identity) || string.IsNullOrWhiteSpace(@event.ContainingType) || string.IsNullOrWhiteSpace(@event.Method) || @event.GenericArity < 0 || @event.ParameterRefKinds is null || @event.ParameterRefKinds.Count == 0 || @event.ParameterForms is null || @event.ParameterForms.Count == 0 || @event.Placeholders is null || @event.Placeholders.Count > MaxItems || string.IsNullOrWhiteSpace(@event.EventName) || string.IsNullOrEmpty(@event.Message) || !IsEffectiveLevel(@event.Level))
             {
-                throw new ManifestReadException("A manifest event is incomplete or too large.");
+                throw new ManifestValidationException("A manifest event is incomplete, non-canonical, or unrelated to a manifest project.");
             }
+
+            if (@event.ParameterRefKinds.Any(kind => string.IsNullOrWhiteSpace(kind)) || @event.ParameterForms.Any(form => string.IsNullOrWhiteSpace(form)))
+            {
+                throw new ManifestValidationException("A manifest event contains an invalid parameter form.");
+            }
+
+            foreach (var placeholder in @event.Placeholders)
+            {
+                if (placeholder is null || string.IsNullOrWhiteSpace(placeholder.Name) || string.IsNullOrWhiteSpace(placeholder.Token))
+                {
+                    throw new ManifestValidationException("A manifest event contains an incomplete placeholder.");
+                }
+            }
+
             ValidateSource(@event.Source);
         }
 
         foreach (var item in manifest.Unsupported)
         {
+            if (string.IsNullOrWhiteSpace(item.ProjectKey) || !projectKeys.Contains(item.ProjectKey) || string.IsNullOrWhiteSpace(item.Declaration) || string.IsNullOrWhiteSpace(item.DeclarationKey) || string.IsNullOrWhiteSpace(item.Reason))
+            {
+                throw new ManifestValidationException("A manifest unsupported declaration is incomplete or unrelated to a manifest project.");
+            }
+
             ValidateSource(item.Source);
         }
 
         foreach (var issue in manifest.AnalysisIssues)
         {
-            if (issue.Sources is null || issue.Sources.Count > MaxItems)
+            if (string.IsNullOrWhiteSpace(issue.ProjectKey) || !projectKeys.Contains(issue.ProjectKey) || string.IsNullOrWhiteSpace(issue.Code) || string.IsNullOrWhiteSpace(issue.Severity) || !issue.Severity.Equals("error", StringComparison.OrdinalIgnoreCase) && !issue.Severity.Equals("warning", StringComparison.OrdinalIgnoreCase) || string.IsNullOrWhiteSpace(issue.Message) || issue.DeclarationKey is null || issue.Sources is null || issue.Sources.Count > MaxItems)
             {
-                throw new ManifestReadException("A manifest analysis issue is too large.");
+                throw new ManifestValidationException("A manifest analysis issue is incomplete or unrelated to a manifest project.");
             }
             foreach (var source in issue.Sources)
             {
                 ValidateSource(source);
             }
         }
+
+        if (manifest.CompilationDiagnosticKinds.Any(kind => string.IsNullOrWhiteSpace(kind)) || manifest.WorkspaceDiagnosticKinds.Any(kind => string.IsNullOrWhiteSpace(kind)))
+        {
+            throw new ManifestValidationException("A manifest diagnostic-kind list contains an empty value.");
+        }
     }
 
-    private static void ValidateSource(SourceLocation source)
+    private static bool IsEffectiveLevel(string? level) => level is "Trace" or "Debug" or "Information" or "Warning" or "Error" or "Critical" or "None" or "Dynamic" || int.TryParse(level, out _);
+
+    private static void ValidateJsonSource(JsonElement parent, string name)
     {
-        if (source is null || string.IsNullOrWhiteSpace(source.File) || Path.IsPathRooted(source.File) || source.File.Contains('\\', StringComparison.Ordinal) || source.File.Contains(':', StringComparison.Ordinal))
+        if (!parent.TryGetProperty(name, out var source) || source.ValueKind != JsonValueKind.Object)
         {
-            throw new ManifestReadException("A manifest source location contains an absolute or non-canonical path.");
+            throw new ManifestValidationException($"The manifest field '{name}' is required and must be an object.");
+        }
+        RequireString(source, "file");
+        _ = RequiredInteger(source, "line");
+        RequireString(source, "kind");
+    }
+
+    private static void ValidateSource(SourceLocation? source)
+    {
+        if (source is null || string.IsNullOrWhiteSpace(source.File) || source.Line < 1 || source.Kind is not ("source" or "generated") || Path.IsPathRooted(source.File) || source.File.Contains('\\', StringComparison.Ordinal) || source.File.Contains(':', StringComparison.Ordinal) || source.File.Contains("//", StringComparison.Ordinal) || source.File.Split('/').Any(segment => segment is "" or "." or ".."))
+        {
+            throw new ManifestValidationException("A manifest source location is incomplete or contains an absolute or non-canonical path.");
         }
     }
 }
 
+internal sealed class ManifestValidationException(string message) : Exception(message);
+
 internal sealed class ManifestReadException(string message) : Exception(message);
+
+internal sealed class ManifestWriteException(string message) : Exception(message);

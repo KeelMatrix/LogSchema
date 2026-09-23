@@ -5,6 +5,7 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/KeelMatrix.LogSchema.Tests/KeelMatrix.LogSchema.Tests.csproj" />
+    <Project Path="tests/PackageConsumerFixture/PackageConsumerFixture.csproj" />
   </Folder>
   <Folder Name="/phase0/">
     <Project Path="phase0/Phase0.LogSchemaProbe.csproj" />
