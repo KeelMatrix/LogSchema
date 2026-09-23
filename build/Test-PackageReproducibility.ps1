@@ -209,14 +209,15 @@ function Build-And-Pack {
         [Parameter(Mandatory = $true)][string]$OutputDirectory
     )
 
-    $solution = Join-Path $CloneRoot 'LogSchema.slnx'
     $config = Join-Path $CloneRoot 'NuGet.config'
     $toolProject = Join-Path $CloneRoot 'src/KeelMatrix.LogSchema/KeelMatrix.LogSchema.csproj'
     New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
     # The reproducibility clones share project references; serialize restore writes so
     # platform-specific filesystem timing cannot race on the generated assets files.
-    Invoke-Timed "$Label restore" { dotnet restore $solution --configfile $config --disable-parallel --nologo }
-    Invoke-Timed "$Label build" { dotnet build $solution -c Release --no-restore --nologo }
+    # Restore the packable project directly so solution-level path aliases cannot
+    # evaluate the referenced Core project twice on macOS.
+    Invoke-Timed "$Label restore" { dotnet restore $toolProject --configfile $config --disable-parallel --nologo }
+    Invoke-Timed "$Label build" { dotnet build $toolProject -c Release --no-restore --nologo }
     Invoke-Timed "$Label pack" { dotnet pack $toolProject -c Release --no-build --no-restore --nologo -o $OutputDirectory }
 }
 
