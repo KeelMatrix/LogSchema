@@ -142,8 +142,7 @@ Linux parity is verified with the pinned Ubuntu SDK `10.0.401`. The Linux
 run exited `0`, and the generated net8 manifest SHA-256 matched the Windows
 value `0CF8E71D3C93A9DDFD1E9334AF5F1F509262B8ABB1A72673EDFE18C49A718B85`.
 
-macOS remains supported by design. The public CI workflow includes a macOS leg;
-its first green result will be recorded here before macOS parity is claimed.
+macOS parity is verified by [public CI run 35874369927](https://github.com/KeelMatrix/LogSchema/actions/runs/35874369927), whose macOS leg exited `0` with the pinned SDK `10.0.401`.
 
 ## Full validation evidence
 

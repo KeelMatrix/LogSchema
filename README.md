@@ -107,7 +107,7 @@ The stable diagnostic reference is in [COMPATIBILITY-RULES.md](COMPATIBILITY-RUL
 
 ## Cross-platform and SDK support
 
-The public CI workflow validates Windows, Linux, and macOS on the SDK pinned in `global.json`. Local validation evidence verifies Windows and Linux; the first public matrix run records the macOS result before parity is claimed. The tool targets `net8.0`, has no OS-specific path or shell behavior, and uses centrally pinned Roslyn/MSBuild dependencies. The repository development SDK is pinned to `10.0.401`, and the tool does not require a network connection after restore.
+The public CI workflow validates Windows, Linux, and macOS on the SDK pinned in `global.json`. [CI run 35874369927](https://github.com/KeelMatrix/LogSchema/actions/runs/35874369927) verified all three legs, including macOS. The tool targets `net8.0`, has no OS-specific path or shell behavior, and uses centrally pinned Roslyn/MSBuild dependencies. The repository development SDK is pinned to `10.0.401`, and the tool does not require a network connection after restore.
 
 ## Privacy and security
 

@@ -6,7 +6,7 @@ Changes for the KeelMatrix.LogSchema package are recorded here using the Keep a 
 
 ### Changed
 
-- Clarified that Windows and Linux are verified by repository validation while macOS remains supported by design without local parity evidence.
+- Added public CI validation for Windows, Linux, and macOS using the SDK pinned in `global.json`; [CI run 35874369927](https://github.com/KeelMatrix/LogSchema/actions/runs/35874369927) verified all three legs.
 
 ### Added
 

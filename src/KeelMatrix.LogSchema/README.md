@@ -45,6 +45,10 @@ Options: `--format text|json`, `--severity breaking|warning|all`, `--accept <cod
 
 The tool reads SDK-style C# projects through design-time MSBuild/Roslyn APIs. It does not execute target application code, inspect runtime logs, or replace secret/redaction tooling. After restore, analysis is local and does not require a hosted service.
 
+## Platform support
+
+The tool is supported on Windows, Linux, and macOS. The public CI matrix verified all three platforms in [CI run 35874369927](https://github.com/KeelMatrix/LogSchema/actions/runs/35874369927) using the SDK pinned in `global.json`.
+
 For troubleshooting and the full supported declaration scope, see the [repository README](https://github.com/KeelMatrix/LogSchema/blob/main/README.md), [compatibility rules](https://github.com/KeelMatrix/LogSchema/blob/main/COMPATIBILITY-RULES.md), and [manifest schema](https://github.com/KeelMatrix/LogSchema/blob/main/MANIFEST.md).
 
 ## License
