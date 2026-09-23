@@ -213,7 +213,9 @@ function Build-And-Pack {
     $config = Join-Path $CloneRoot 'NuGet.config'
     $toolProject = Join-Path $CloneRoot 'src/KeelMatrix.LogSchema/KeelMatrix.LogSchema.csproj'
     New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
-    Invoke-Timed "$Label restore" { dotnet restore $solution --configfile $config --nologo }
+    # The reproducibility clones share project references; serialize restore writes so
+    # platform-specific filesystem timing cannot race on the generated assets files.
+    Invoke-Timed "$Label restore" { dotnet restore $solution --configfile $config --disable-parallel --nologo }
     Invoke-Timed "$Label build" { dotnet build $solution -c Release --no-restore --nologo }
     Invoke-Timed "$Label pack" { dotnet pack $toolProject -c Release --no-build --no-restore --nologo -o $OutputDirectory }
 }
