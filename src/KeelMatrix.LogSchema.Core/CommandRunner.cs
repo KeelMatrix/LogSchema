@@ -321,5 +321,7 @@ Compatibility summary:
   with incomplete coverage and no findings. Raw type prefixes and suffixes are never trusted.
   KMLOGP006 means no supported [LoggerMessage] declarations were found; capture/check return 3 and
   capture does not write a baseline. diff remains a pure manifest comparison.
+  Source provenance uses project/, external/up-N/, and generated/ logical identities; unsafe or
+  colliding identities return 3 with KMLOGP008 rather than silently sharing a source location.
 """;
 }

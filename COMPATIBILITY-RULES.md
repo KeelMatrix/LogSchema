@@ -35,5 +35,6 @@ Manifest read validation runs before comparison. Each canonical identity paramet
 | KMLOGP005 | The project compilation contains an error other than the expected design-time unimplemented-partial diagnostic. | Error; capture/check return exit 3 because the extracted contract is not trustworthy. |
 | KMLOGP006 | No supported `[LoggerMessage]` declarations were found. | `capture` and `check` return exit 3; `capture` writes no baseline and `check` rejects a zero-event baseline. |
 | KMLOGP007 | The manifest contains unsupported declarations. | `check` and `diff` return exit 3 and report the unsupported declaration identities and reasons; the supported subset is not presented as complete coverage. |
+| KMLOGP008 | A source document has no safe stable logical identity, or distinct syntax trees resolve to one logical source provenance identity. | Error; capture/check return exit 3 and no baseline is written because source diagnostics could identify the wrong document. |
 
 Rules apply to C# methods using `Microsoft.Extensions.Logging.LoggerMessageAttribute` within the documented v1 supported declaration scope. Manual logging calls, runtime values, providers, and arbitrary third-party generators are not compared.

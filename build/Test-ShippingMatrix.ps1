@@ -100,6 +100,51 @@ function Assert-OrdinaryFixture {
     Write-Host "$Name shipping manifest: events=$(@($manifest.events).Count) unsupported=$(@($manifest.unsupported).Count) sha256=$firstHash"
 }
 
+function Assert-RootIndependentManifest {
+    $sourceFixture = Join-Path $RepositoryRoot 'tests/PackageConsumerFixture'
+    $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('logschema-manifest-roots-' + [guid]::NewGuid().ToString('N'))
+    $firstRoot = Join-Path $tempRoot 'first'
+    $secondRoot = Join-Path $tempRoot 'second'
+    try {
+        foreach ($root in @($firstRoot, $secondRoot)) {
+            New-Item -ItemType Directory -Force -Path $root | Out-Null
+            Copy-Item -LiteralPath (Join-Path $sourceFixture 'PackageConsumerFixture.csproj') -Destination $root
+            Get-ChildItem -LiteralPath $sourceFixture -Filter '*.cs' -File | Copy-Item -Destination $root
+
+            & dotnet restore (Join-Path $root 'PackageConsumerFixture.csproj') --configfile (Join-Path $RepositoryRoot 'NuGet.config') --nologo | Out-Host
+            Assert-That ($LASTEXITCODE -eq 0) "root-independent fixture restore failed for $root"
+        }
+
+        $firstManifest = Join-Path $firstRoot 'logschema.json'
+        $secondManifest = Join-Path $secondRoot 'logschema.json'
+        foreach ($pair in @(
+                @($firstRoot, $firstManifest),
+                @($secondRoot, $secondManifest))) {
+            $capture = Invoke-ShippingTool -Arguments @('capture', (Join-Path $pair[0] 'PackageConsumerFixture.csproj'), '--output', $pair[1], '--no-telemetry')
+            Assert-That ($capture.ExitCode -eq 0) "root-independent fixture capture failed for $($pair[0]): $($capture.Output)"
+        }
+
+        $firstHash = (Get-FileHash -LiteralPath $firstManifest -Algorithm SHA256).Hash.ToUpperInvariant()
+        $secondHash = (Get-FileHash -LiteralPath $secondManifest -Algorithm SHA256).Hash.ToUpperInvariant()
+        Assert-That ($firstHash -eq $secondHash) 'equivalent checkouts must produce byte-identical manifests'
+
+        $manifest = Get-Content -Raw -LiteralPath $firstManifest | ConvertFrom-Json
+        foreach ($event in @($manifest.events)) {
+            Assert-That ([string]$event.source.file -match '^project/') 'project source provenance must use the project namespace'
+            Assert-That (-not [IO.Path]::IsPathRooted([string]$event.source.file)) 'root-independent provenance must not be absolute'
+            Assert-That (-not ([string]$event.source.file).Contains($firstRoot, [StringComparison]::OrdinalIgnoreCase)) 'root-independent provenance must not contain the first checkout root'
+            Assert-That (-not ([string]$event.source.file).Contains($secondRoot, [StringComparison]::OrdinalIgnoreCase)) 'root-independent provenance must not contain the second checkout root'
+        }
+
+        Write-Host "Root-independent manifest: sha256=$firstHash"
+    }
+    finally {
+        if (Test-Path -LiteralPath $tempRoot) {
+            Remove-Item -LiteralPath $tempRoot -Recurse -Force
+        }
+    }
+}
+
 $generatorProject = Join-Path $RepositoryRoot 'fixtures/Phase0.GeneratedDeclarationGenerator/Phase0.GeneratedDeclarationGenerator.csproj'
 & dotnet build $generatorProject -c Debug --no-restore --nologo | Out-Host
 Assert-That ($LASTEXITCODE -eq 0) 'the generated-declaration fixture must build before shipping pairing validation'
@@ -108,6 +153,7 @@ Assert-OrdinaryFixture -Name 'net8' -Project 'fixtures/Phase0.Net8/Phase0.Net8.c
 Assert-OrdinaryFixture -Name 'stable' -Project 'fixtures/Phase0.Stable/Phase0.Stable.csproj' -TargetFramework 'net10.0' -Namespace 'Phase0.Stable'
 Assert-OrdinaryFixture -Name 'multi-net8' -Project 'fixtures/Phase0.Multi/Phase0.Multi.csproj' -TargetFramework 'net8.0' -Namespace 'Phase0.Multi'
 Assert-OrdinaryFixture -Name 'multi-net10' -Project 'fixtures/Phase0.Multi/Phase0.Multi.csproj' -TargetFramework 'net10.0' -Namespace 'Phase0.Multi'
+Assert-RootIndependentManifest
 
 $pairingOutput = Join-Path $outputRoot 'pairing.json'
 $pairing = Invoke-ShippingTool -Arguments @('capture', (Join-Path $RepositoryRoot 'fixtures/Phase0.Pairing/Phase0.Pairing.csproj'), '--tfm', 'net8.0', '--output', $pairingOutput, '--no-telemetry')

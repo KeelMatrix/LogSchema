@@ -151,10 +151,11 @@ internal sealed class LogSchemaExtractor
         private readonly List<EventContract> events = [];
         private readonly List<UnsupportedDeclaration> unsupported = [];
         private readonly List<AnalysisIssue> analysisIssues = [];
-        private readonly List<SourceLocation> sourceOccurrences = [];
         private readonly HashSet<SyntaxTree> scannedTrees = [];
         private readonly Dictionary<string, List<SourceLocation>> sourceDeclarations = new(StringComparer.Ordinal);
         private readonly HashSet<string> pairedGeneratedDeclarations = new(StringComparer.Ordinal);
+        private readonly SourceProvenanceRegistry sourceProvenance = new();
+        private readonly HashSet<string> reportedProvenanceCollisions = new(StringComparer.Ordinal);
         private readonly string projectDirectory;
 
         internal ProjectExtractor(Project project, Compilation compilation, ProjectIdentity projectIdentity)
@@ -175,18 +176,18 @@ internal sealed class LogSchemaExtractor
                 if (root is not null && model is not null)
                 {
                     scannedTrees.Add(root.SyntaxTree);
-                    Scan(root, model, document.FilePath ?? document.Name, true);
+                    Scan(root, model, document.FilePath ?? document.Name, true, root.SyntaxTree);
                 }
             }
 
-            foreach (var tree in compilation.SyntaxTrees.OrderBy(tree => NormalizeGeneratedPath(tree.FilePath), StringComparer.Ordinal))
+            foreach (var tree in compilation.SyntaxTrees.OrderBy(tree => SourceProvenance.NormalizeGeneratedPath(tree.FilePath, tree.GetText(cancellationToken).ToString()), StringComparer.Ordinal))
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 if (!scannedTrees.Add(tree))
                 {
                     continue;
                 }
-                Scan(tree.GetRoot(cancellationToken), compilation.GetSemanticModel(tree), tree.FilePath ?? "generated.cs", false);
+                Scan(tree.GetRoot(cancellationToken), compilation.GetSemanticModel(tree), tree.FilePath, false, tree);
             }
 
             foreach (var pair in sourceDeclarations.Where(pair => pair.Value.Count > 1).OrderBy(pair => pair.Key, StringComparer.Ordinal))
@@ -223,8 +224,22 @@ internal sealed class LogSchemaExtractor
             return new ProjectExtractionResult(events, unsupported, analysisIssues, diagnostics);
         }
 
-        private void Scan(SyntaxNode root, SemanticModel model, string filePath, bool isProjectSource)
+        private void Scan(SyntaxNode root, SemanticModel model, string? filePath, bool isProjectSource, SyntaxTree syntaxTree)
         {
+            var logicalPath = isProjectSource
+                ? SourceProvenance.NormalizeProjectRelativePath(projectDirectory, filePath ?? string.Empty)
+                : SourceProvenance.NormalizeGeneratedPath(filePath, syntaxTree.GetText().ToString());
+            if (!sourceProvenance.TryRegister(isProjectSource ? "source" : "generated", logicalPath, syntaxTree) && reportedProvenanceCollisions.Add(logicalPath))
+            {
+                analysisIssues.Add(new AnalysisIssue(
+                    projectIdentity.Key,
+                    "KMLOGP008",
+                    "error",
+                    "Distinct syntax trees share one canonical source provenance identity.",
+                    logicalPath,
+                    [new SourceLocation(logicalPath, 1, isProjectSource ? "source" : "generated")]));
+            }
+
             foreach (var methodSyntax in root.DescendantNodes().OfType<MethodDeclarationSyntax>())
             {
                 var methodSymbol = model.GetDeclaredSymbol(methodSyntax);
@@ -234,8 +249,7 @@ internal sealed class LogSchemaExtractor
                     continue;
                 }
 
-                var source = new SourceLocation(isProjectSource ? NormalizeProjectRelativePath(filePath) : NormalizeGeneratedPath(filePath), methodSyntax.GetLocation().GetLineSpan().StartLinePosition.Line + 1, isProjectSource ? "source" : "generated");
-                sourceOccurrences.Add(source);
+                var source = new SourceLocation(logicalPath, methodSyntax.GetLocation().GetLineSpan().StartLinePosition.Line + 1, isProjectSource ? "source" : "generated");
                 var declarationKey = GetDeclarationKey(methodSymbol);
                 if (isProjectSource)
                 {
@@ -275,15 +289,6 @@ internal sealed class LogSchemaExtractor
 
         private void AddUnsupported(SourceLocation source, MethodDeclarationSyntax syntax, string declarationKey, string reason) => unsupported.Add(new UnsupportedDeclaration(projectIdentity.Key, source, NormalizeDeclaration(syntax.ToString()), declarationKey, reason));
 
-        private string NormalizeProjectRelativePath(string path)
-        {
-            var candidate = Path.IsPathRooted(path) ? Path.GetRelativePath(projectDirectory, path) : path;
-            return NormalizePath(candidate);
-        }
-
-        private static string NormalizeGeneratedPath(string? path) => "generated/" + (string.IsNullOrWhiteSpace(path) ? "generated.cs" : Path.GetFileName(path!));
-
-        private static string NormalizePath(string path) => path.Replace('\\', '/').TrimStart('.', '/');
     }
 
     private sealed record ProjectExtractionResult(

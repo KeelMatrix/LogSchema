@@ -19,6 +19,12 @@ public sealed class ExtractorTests
             Assert.Equal(0, exitCode);
             using var document = JsonDocument.Parse(await File.ReadAllTextAsync(outputPath));
             var events = document.RootElement.GetProperty("events").EnumerateArray().ToDictionary(item => item.GetProperty("method").GetString()!, StringComparer.Ordinal);
+            Assert.All(events.Values, @event =>
+            {
+                var source = @event.GetProperty("source").GetProperty("file").GetString()!;
+                Assert.StartsWith("project/", source, StringComparison.Ordinal);
+                Assert.DoesNotContain(Path.GetDirectoryName(projectPath)!, source, StringComparison.OrdinalIgnoreCase);
+            });
 
             var omittedEventId = events["OmittedEventId"];
             Assert.Equal("OmittedEventId", omittedEventId.GetProperty("eventName").GetString());
@@ -116,6 +122,33 @@ public sealed class ExtractorTests
             var specialTemplate = events["SpecialExceptionInTemplate"];
             Assert.Equal("Exception", specialTemplate.GetProperty("parameters").EnumerateArray().ElementAt(1).GetProperty("role").GetString());
             Assert.Equal("exception", specialTemplate.GetProperty("structuredState").EnumerateArray().Single().GetProperty("emittedName").GetString());
+        }
+        finally
+        {
+            Directory.Delete(Path.GetDirectoryName(outputPath)!, true);
+        }
+    }
+
+    [Fact]
+    public async Task ShippingExtractorPreservesDistinctLinkedAndDotPrefixedSourceProvenance()
+    {
+        var projectPath = FindRepositoryFile("tests", "ProvenanceFixture", "ProvenanceFixture.csproj");
+        var outputPath = Path.Combine(Directory.CreateTempSubdirectory("logschema-provenance-fixture-").FullName, "logschema.json");
+        try
+        {
+            using var output = new StringWriter();
+            using var errors = new StringWriter();
+            Assert.Equal(0, await CommandRunner.RunAsync(["capture", projectPath, "--output", outputPath, "--no-telemetry"], output, errors));
+
+            using var document = JsonDocument.Parse(await File.ReadAllTextAsync(outputPath));
+            var events = document.RootElement.GetProperty("events").EnumerateArray().ToDictionary(item => item.GetProperty("method").GetString()!, StringComparer.Ordinal);
+            Assert.Equal("project/Shared/Logging.cs", events["InProject"].GetProperty("source").GetProperty("file").GetString());
+            Assert.Equal("project/.hidden/Logging.cs", events["DotPrefixed"].GetProperty("source").GetProperty("file").GetString());
+            Assert.Equal("external/up-1/Shared/Logging.cs", events["Linked"].GetProperty("source").GetProperty("file").GetString());
+            Assert.NotEqual(
+                events["InProject"].GetProperty("source").GetProperty("file").GetString(),
+                events["Linked"].GetProperty("source").GetProperty("file").GetString());
+            Assert.DoesNotContain(Path.GetDirectoryName(projectPath)!, await File.ReadAllTextAsync(outputPath), StringComparison.OrdinalIgnoreCase);
         }
         finally
         {
