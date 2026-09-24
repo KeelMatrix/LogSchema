@@ -206,7 +206,9 @@ internal sealed class LogSchemaExtractor
                 .Distinct(StringComparer.Ordinal)
                 .OrderBy(value => value, StringComparer.Ordinal)
                 .ToArray();
-            var fatalDiagnostics = diagnostics.Where(value => value.EndsWith(":Error", StringComparison.Ordinal) && !value.StartsWith("CS8795:", StringComparison.Ordinal)).ToArray();
+            var fatalDiagnostics = diagnostics.Where(value => value.EndsWith(":Error", StringComparison.Ordinal) &&
+                !value.StartsWith("CS8795:", StringComparison.Ordinal) &&
+                !value.StartsWith("SYSLIB1015:", StringComparison.Ordinal)).ToArray();
             if (fatalDiagnostics.Length > 0)
             {
                 analysisIssues.Add(new AnalysisIssue(
@@ -319,7 +321,7 @@ internal sealed class LogSchemaExtractor
             reason = "method has no ILogger parameter";
             return false;
         }
-        if (!TryReadAttribute(attribute, method, out var eventId, out var eventName, out var level, out var message, out reason))
+        if (!TryReadAttribute(attribute, method, out var eventId, out var eventName, out var level, out var message, out var levelParameter, out reason))
         {
             return false;
         }
@@ -327,13 +329,67 @@ internal sealed class LogSchemaExtractor
         {
             return false;
         }
-        var valueParameters = method.Parameters
-            .Where(parameter => !IsLogger(parameter.Type) && !IsException(parameter.Type) && !IsLogLevel(parameter.Type))
-            .Select(parameter => parameter.Name)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        if (placeholders.Any(placeholder => !valueParameters.Contains(placeholder.Name)))
+
+        var roles = new Dictionary<string, string>(StringComparer.Ordinal);
+        var loggerParameter = string.Empty;
+        string? exceptionParameter = null;
+        var loggerSeen = false;
+        var exceptionSeen = false;
+        var dynamicLevelSeen = false;
+        var dynamicLevel = string.Equals(level, DynamicLevelName, StringComparison.Ordinal);
+        foreach (var parameter in method.Parameters)
         {
-            reason = "message placeholder does not match a non-special method parameter";
+            var role = "State";
+            if (!loggerSeen && IsLogger(parameter.Type))
+            {
+                role = "Logger";
+                loggerSeen = true;
+                loggerParameter = parameter.Name;
+            }
+            else if (!exceptionSeen && IsException(parameter.Type))
+            {
+                role = "Exception";
+                exceptionSeen = true;
+                exceptionParameter = parameter.Name;
+            }
+            else if (dynamicLevel && !dynamicLevelSeen && IsLogLevel(parameter.Type))
+            {
+                role = "DynamicLevel";
+                dynamicLevelSeen = true;
+            }
+
+            roles.Add(parameter.Name, role);
+        }
+
+        var parametersByName = method.Parameters.ToDictionary(parameter => parameter.Name, StringComparer.OrdinalIgnoreCase);
+        foreach (var placeholder in placeholders)
+        {
+            if (!parametersByName.TryGetValue(placeholder.Name, out var parameter))
+            {
+                reason = "message placeholder does not match a method parameter";
+                return false;
+            }
+
+            var role = roles[parameter.Name];
+            if (role is "Logger" or "DynamicLevel")
+            {
+                reason = $"message placeholder references the generator-special {role} parameter, which is outside the supported declaration scope";
+                return false;
+            }
+        }
+
+        var structuredState = method.Parameters
+            .Where(parameter => roles[parameter.Name] == "State" || roles[parameter.Name] == "Exception" && placeholders.Any(placeholder => string.Equals(placeholder.Name, parameter.Name, StringComparison.OrdinalIgnoreCase)))
+            .Select(parameter =>
+            {
+                var matchedPlaceholder = placeholders.FirstOrDefault(placeholder => string.Equals(placeholder.Name, parameter.Name, StringComparison.OrdinalIgnoreCase));
+                return new StructuredStateProperty(parameter.Name, matchedPlaceholder?.Name ?? parameter.Name);
+            })
+            .ToArray();
+
+        if (string.IsNullOrEmpty(loggerParameter))
+        {
+            reason = "method has no generator-effective ILogger parameter";
             return false;
         }
 
@@ -351,16 +407,27 @@ internal sealed class LogSchemaExtractor
             message,
             placeholders,
             method.Parameters.Select(parameter => GetParameterForm(parameter.Type)).ToArray(),
-            source);
+            source,
+            method.Parameters.Select(parameter => new ParameterContract(
+                parameter.Name,
+                parameter.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat).Replace("global::", string.Empty, StringComparison.Ordinal),
+                parameter.RefKind.ToString(),
+                roles[parameter.Name])).ToArray(),
+            structuredState,
+            loggerParameter,
+            exceptionParameter,
+            dynamicLevel ? "Dynamic" : "Fixed",
+            dynamicLevel ? levelParameter : null);
         return true;
     }
 
-    private static bool TryReadAttribute(AttributeData attribute, IMethodSymbol method, out int eventId, out string eventName, out string level, out string message, out string? reason)
+    private static bool TryReadAttribute(AttributeData attribute, IMethodSymbol method, out int eventId, out string eventName, out string level, out string message, out string? levelParameter, out string? reason)
     {
         eventId = 0;
         eventName = method.Name;
         level = string.Empty;
         message = string.Empty;
+        levelParameter = null;
         reason = null;
         int? suppliedEventId = null;
         string? suppliedEventName = null;
@@ -410,7 +477,8 @@ internal sealed class LogSchemaExtractor
         }
         else
         {
-            if (!method.Parameters.Any(parameter => IsLogLevel(parameter.Type)))
+            levelParameter = method.Parameters.FirstOrDefault(parameter => IsLogLevel(parameter.Type))?.Name;
+            if (levelParameter is null)
             {
                 reason = "level was omitted and no LogLevel parameter supplies a dynamic level";
                 return false;
@@ -471,8 +539,8 @@ internal sealed class LogSchemaExtractor
         return hash == int.MinValue ? 0 : Math.Abs(hash);
     }
 
-    private static bool IsLogger(ITypeSymbol type) => type.Name == "ILogger" && type.ContainingNamespace.ToDisplayString() == "Microsoft.Extensions.Logging";
-    private static bool IsLogLevel(ITypeSymbol type) => type.Name == "LogLevel" && type.ContainingNamespace.ToDisplayString() == "Microsoft.Extensions.Logging";
+    private static bool IsLogger(ITypeSymbol type) => type is INamedTypeSymbol named && named.Name == "ILogger" && named.ContainingType is null && named.ContainingNamespace.ToDisplayString() == "Microsoft.Extensions.Logging" && named.Arity is 0 or 1;
+    private static bool IsLogLevel(ITypeSymbol type) => type is INamedTypeSymbol named && named.Name == "LogLevel" && named.ContainingType is null && named.ContainingNamespace.ToDisplayString() == "Microsoft.Extensions.Logging" && named.Arity == 0;
     private static string GetParameterForm(ITypeSymbol type) => ManifestJson.GetRequiredParameterForm(type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat).Replace("global::", string.Empty, StringComparison.Ordinal));
     private static bool IsException(ITypeSymbol type)
     {

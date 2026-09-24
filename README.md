@@ -52,11 +52,11 @@ dotnet tool run logschema diff old-logschema.json new-logschema.json
 
 ## What is a log contract?
 
-A log contract is the stable, reviewable shape of a supported source-generated logging event: its project identity, containing type, method identity, EventId, EventName, level, message template, and structured placeholder names in order. The manifest may contain operational vocabulary such as event names and property names, so review it like source code.
+A log contract is the stable, reviewable shape of a supported source-generated logging event: its project identity, containing type, method identity, EventId, EventName, level source, message template, message-template placeholder occurrences, generator-effective parameter roles, and emitted structured-state properties in method-parameter order. A placeholder is a template occurrence; structured state is the unique set of emitted properties. The manifest may contain operational vocabulary such as event names and property names, so review it like source code.
 
 ## Supported declaration scope
 
-V1 supports C# methods using `Microsoft.Extensions.Logging.LoggerMessageAttribute` when the declaration has compile-time attribute values, is a partial void method, is inside a partial type, has an `ILogger` parameter, and uses message placeholders that match ordinary method parameters. Constants, named arguments, explicit and default EventName values, nested/partial types, Unicode text, exception/logger/LogLevel parameters, escaped placeholders, and format specifiers are represented. Unsupported discovered declarations are listed in the manifest with a reason; they are never silently omitted.
+V1 supports C# methods using `Microsoft.Extensions.Logging.LoggerMessageAttribute` when the declaration has compile-time attribute values, is a partial void method, is inside a partial type, and has a generator-supported parameter model. The first applicable `ILogger`, exception-derived, and dynamic `LogLevel` parameters are special; later candidates remain ordinary structured-state parameters. Every other ordinary parameter is structured state even when absent from the message template. A matched placeholder controls the emitted property's casing, while repeated occurrences do not duplicate one state property. Constants, named arguments, explicit and default EventName values, nested/partial types, Unicode text, exception/logger/LogLevel parameters, escaped placeholders, and format specifiers are represented. A placeholder for the first logger or dynamic-level parameter is explicitly unsupported; a placeholder for the first exception is represented with the generator's additional exception/state behavior. Unsupported discovered declarations are listed in the manifest with a reason; they are never silently omitted.
 
 V1 does not inspect runtime logs, manual/interpolated logging calls, providers, secrets, PII, hosted registries, or target application execution.
 
@@ -69,13 +69,14 @@ The complete rule matrix and stable diagnostic codes are maintained in [COMPATIB
 | Event added | INFO | no |
 | Event removed or method identity changed | BREAKING | yes |
 | EventId or EventName changed | BREAKING | yes |
-| Structured placeholder removed or renamed | BREAKING | yes |
-| Structured placeholder order changed | BREAKING | yes |
-| Structured placeholder added | INFO | no |
+| Structured-state property removed or renamed | BREAKING | yes |
+| Structured-state property order changed | BREAKING | yes |
+| Structured-state property added | INFO | no |
+| Generator-effective parameter role changed | BREAKING | yes |
 | LogLevel changed | WARNING | no; use `--severity warning` |
-| Template prose changed with the same structured shape | INFO | no |
+| Message template changed with the same structured state | INFO | no |
 
-Structured identity fields are compared with exact ordinal semantics. The reader parses every declared type with Roslyn and rejects text that is not byte-identical to the canonical rendering: namespace-qualified, without `global::`, `@`-escaped identifiers, trivia/comments, or non-canonical generic spacing. It then classifies structurally: `ILogger` only for top-level `Microsoft.Extensions.Logging.ILogger` with arity 0 or exactly one type argument, `LogLevel` only for exact top-level `Microsoft.Extensions.Logging.LogLevel`, `Exception` only for exact top-level `System.Exception`, and `None` for every other top-level canonical type, including wrong-arity or generic-rooted nested logger members and derived exceptions. Raw type prefixes and suffixes are never trusted. Both the embedded form and redundant `parameterForms` position must equal that result, so coordinated, one-sided, and additive form forgeries fail as analysis errors. Derived exception events remain supported; capture records their declared type with form `None` and uses semantic inheritance only to exclude exception parameters from message placeholders. Case-only changes to placeholder names are structured renames (`KMLOG102`), while `KMLOG301` is reserved for prose changes whose structured shape is unchanged under ordinal comparison.
+Structured identity fields are compared with exact ordinal semantics. The reader parses every declared type with Roslyn and rejects text that is not byte-identical to the canonical rendering: namespace-qualified, without `global::`, `@`-escaped identifiers, trivia/comments, or non-canonical generic spacing. The manifest's type `form` is a structural identity projection; the persisted parameter `role` is the source-derived generator model. Both the embedded form and redundant `parameterForms` position must match the reader's structural type classification, including rejection of wrong-arity or generic-rooted nested logger members, while parameter names, first-special roles, and structured-state membership are validated as a coherent model. Derived exception events remain supported even though their declared type has form `None`. Case-only changes to emitted structured-property names are structured renames (`KMLOG102`), while `KMLOG301` is reserved for message-template changes whose effective structured state is unchanged under ordinal comparison.
 
 Intentional changes can be accepted explicitly with repeated `--accept <diagnostic-code>`. Acceptance affects only the current comparison; it never rewrites a baseline.
 

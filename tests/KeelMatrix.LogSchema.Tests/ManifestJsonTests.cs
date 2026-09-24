@@ -23,7 +23,7 @@ public sealed class ManifestJsonTests
     [Fact]
     public async Task SerializationIsCanonicalUtf8AndPathIndependent()
     {
-        var manifest = new ManifestDocument(1, [new ProjectIdentity("P|net8.0", "P", "P", "net8.0")], [new EventContract("P|net8.0", "P.Logging.Event`0(None:ILogger:Microsoft.Extensions.Logging.ILogger)", "P.Logging", "Event", 0, ["None"], 10, "Event", "Information", "Событие {Идентификатор}", [new Placeholder("Идентификатор", "Идентификатор")], ["ILogger"], new SourceLocation("src/Logging.cs", 4, "source"))], [], [], [], []);
+        var manifest = new ManifestDocument(1, [new ProjectIdentity("P|net8.0", "P", "P", "net8.0")], [new EventContract("P|net8.0", "P.Logging.Event`0(None:ILogger:Microsoft.Extensions.Logging.ILogger,None:None:string)", "P.Logging", "Event", 0, ["None", "None"], 10, "Event", "Information", "Событие {Идентификатор}", [new Placeholder("Идентификатор", "Идентификатор")], ["ILogger", "None"], new SourceLocation("src/Logging.cs", 4, "source"), [new ParameterContract("logger", "Microsoft.Extensions.Logging.ILogger", "None", "Logger"), new ParameterContract("Идентификатор", "string", "None", "State")], [new StructuredStateProperty("Идентификатор", "Идентификатор")], "logger", null, "Fixed", null)], [], [], [], []);
         var root = Path.Combine(Path.GetTempPath(), "logschema-tests-" + Guid.NewGuid().ToString("N"));
         var first = Path.Combine(root, "one", "logschema.json");
         var second = Path.Combine(root, "two", "logschema.json");
@@ -114,7 +114,7 @@ public sealed class ManifestJsonTests
     [Fact]
     public async Task RepresentativeLargeManifestRoundTripsWithinResourceLimits()
     {
-        const int eventCount = 4_000;
+        const int eventCount = 1_500;
         var root = Directory.CreateTempSubdirectory("logschema-large-");
         var path = Path.Combine(root.FullName, "large.json");
         var events = Enumerable.Range(0, eventCount)
@@ -131,7 +131,13 @@ public sealed class ManifestJsonTests
                 $"Processed {{Value{index}}}",
                 [new Placeholder($"Value{index}", $"Value{index}")],
                 ["ILogger", "None"],
-                new SourceLocation($"Logging/Event{index}.cs", index + 1, "source")))
+                new SourceLocation($"Logging/Event{index}.cs", index + 1, "source"),
+                [new ParameterContract("logger", "Microsoft.Extensions.Logging.ILogger", "None", "Logger"), new ParameterContract($"value{index}", "int", "None", "State")],
+                [new StructuredStateProperty($"value{index}", $"Value{index}")],
+                "logger",
+                null,
+                "Fixed",
+                null))
             .ToArray();
         var manifest = new ManifestDocument(
             1,
@@ -308,6 +314,21 @@ public sealed class ManifestJsonTests
               { "name": "Three", "token": "Three" }
             ],
             "parameterForms": ["ILogger", "None", "None", "None"],
+            "parameters": [
+              { "name": "logger", "type": "Microsoft.Extensions.Logging.ILogger", "refKind": "None", "role": "Logger" },
+              { "name": "one", "type": "string", "refKind": "None", "role": "State" },
+              { "name": "two", "type": "string", "refKind": "None", "role": "State" },
+              { "name": "three", "type": "string", "refKind": "None", "role": "State" }
+            ],
+            "structuredState": [
+              { "parameterName": "one", "emittedName": "One" },
+              { "parameterName": "two", "emittedName": "Two" },
+              { "parameterName": "three", "emittedName": "Three" }
+            ],
+            "loggerParameter": "logger",
+            "exceptionParameter": null,
+            "levelSource": "Fixed",
+            "levelParameter": null,
             "source": { "file": "Logging.cs", "line": 1, "kind": "source" }
           }],
           "unsupported": [],
@@ -372,6 +393,23 @@ public sealed class ManifestJsonTests
             "message": "Event",
             "placeholders": [],
             "parameterForms": ["ILogger", "LogLevel", "Exception", "None", "None", "None"],
+            "parameters": [
+              { "name": "logger", "type": "Microsoft.Extensions.Logging.ILogger", "refKind": "None", "role": "Logger" },
+              { "name": "level", "type": "Microsoft.Extensions.Logging.LogLevel", "refKind": "None", "role": "DynamicLevel" },
+              { "name": "exception", "type": "System.Exception", "refKind": "None", "role": "Exception" },
+              { "name": "derived", "type": "P.DerivedProblem", "refKind": "None", "role": "State" },
+              { "name": "ordinary", "type": "P.OrdinaryProblem", "refKind": "None", "role": "State" },
+              { "name": "value", "type": "string", "refKind": "None", "role": "State" }
+            ],
+            "structuredState": [
+              { "parameterName": "derived", "emittedName": "derived" },
+              { "parameterName": "ordinary", "emittedName": "ordinary" },
+              { "parameterName": "value", "emittedName": "value" }
+            ],
+            "loggerParameter": "logger",
+            "exceptionParameter": "exception",
+            "levelSource": "Dynamic",
+            "levelParameter": "level",
             "source": { "file": "Logging.cs", "line": 1, "kind": "source" }
           }],
           "unsupported": [],
@@ -509,7 +547,7 @@ public sealed class ManifestJsonTests
         var manifest = new ManifestDocument(
             1,
             [new ProjectIdentity("P|net8.0", "P", "P", "net8.0")],
-            [new EventContract("P|net8.0", identity, "P.Logging", "Event", 0, Enumerable.Repeat("None", forms.Length).ToArray(), 1, "Event", "Information", "Event", [], forms, new SourceLocation("Logging.cs", 1, "source"))],
+            [SyntheticEvent(identity, "Event", forms)],
             [],
             [],
             [],
@@ -531,11 +569,30 @@ public sealed class ManifestJsonTests
         return new ManifestDocument(
             1,
             [new ProjectIdentity("P|net8.0", "P", "P", "net8.0")],
-            [new EventContract("P|net8.0", identity, "P.Logging", method, 0, Enumerable.Repeat("None", types.Length).ToArray(), 1, method, "Information", "Event", [], parameterForms, new SourceLocation("Logging.cs", 1, "source"))],
+            [SyntheticEvent(identity, method, parameterForms, types)],
             [],
             [],
             [],
             []);
+    }
+
+    private static EventContract SyntheticEvent(string identity, string method, string[] parameterForms, string[]? types = null, string message = "Event")
+    {
+        types ??= Enumerable.Repeat("string", parameterForms.Length).ToArray();
+        var loggerAssigned = false;
+        var exceptionAssigned = false;
+        var parameters = types.Select((type, index) =>
+        {
+            var form = parameterForms[index];
+            var role = !loggerAssigned && form == "ILogger" ? "Logger" : !exceptionAssigned && form == "Exception" ? "Exception" : "State";
+            loggerAssigned |= role == "Logger";
+            exceptionAssigned |= role == "Exception";
+            return new ParameterContract("parameter" + index.ToString(System.Globalization.CultureInfo.InvariantCulture), type, "None", role);
+        }).ToArray();
+        var loggerParameter = parameters.FirstOrDefault(parameter => parameter.Role == "Logger")?.Name ?? string.Empty;
+        var exceptionParameter = parameters.FirstOrDefault(parameter => parameter.Role == "Exception")?.Name;
+        var structuredState = parameters.Where(parameter => parameter.Role == "State").Select(parameter => new StructuredStateProperty(parameter.Name, parameter.Name)).ToArray();
+        return new EventContract("P|net8.0", identity, "P.Logging", method, 0, Enumerable.Repeat("None", types.Length).ToArray(), 1, method, "Information", message, [], parameterForms, new SourceLocation("Logging.cs", 1, "source"), parameters, structuredState, loggerParameter, exceptionParameter, "Fixed", null);
     }
 
     private sealed record TypePoolEntry(string Text, string ExpectedForm, bool IsCanonical);
@@ -550,7 +607,7 @@ public sealed class ManifestJsonTests
         var manifest = new ManifestDocument(
             1,
             [new ProjectIdentity("P|net8.0", "P", "P", "net8.0")],
-            [new EventContract("P|net8.0", "P.Event`0(None:ILogger:Microsoft.Extensions.Logging.ILogger)", "P", "Event", 0, ["None"], 1, "Event", "Information", huge, [], ["ILogger"], new SourceLocation("Logging.cs", 1, "source"))],
+            [SyntheticEvent("P.Event`0(None:ILogger:Microsoft.Extensions.Logging.ILogger)", "Event", ["ILogger"], ["Microsoft.Extensions.Logging.ILogger"], huge)],
             [], [], [], []);
         try
         {

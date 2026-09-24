@@ -65,11 +65,27 @@ internal sealed record EventContract(
     [property: JsonPropertyName("message")] string Message,
     [property: JsonPropertyName("placeholders")] IReadOnlyList<Placeholder> Placeholders,
     [property: JsonPropertyName("parameterForms")] IReadOnlyList<string> ParameterForms,
-    [property: JsonPropertyName("source")] SourceLocation Source);
+    [property: JsonPropertyName("source")] SourceLocation Source,
+    [property: JsonPropertyName("parameters")] IReadOnlyList<ParameterContract> Parameters,
+    [property: JsonPropertyName("structuredState")] IReadOnlyList<StructuredStateProperty> StructuredState,
+    [property: JsonPropertyName("loggerParameter")] string LoggerParameter,
+    [property: JsonPropertyName("exceptionParameter")] string? ExceptionParameter,
+    [property: JsonPropertyName("levelSource")] string LevelSource,
+    [property: JsonPropertyName("levelParameter")] string? LevelParameter);
 
 internal sealed record Placeholder(
     [property: JsonPropertyName("name")] string Name,
     [property: JsonPropertyName("token")] string Token);
+
+internal sealed record ParameterContract(
+    [property: JsonPropertyName("name")] string Name,
+    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("refKind")] string RefKind,
+    [property: JsonPropertyName("role")] string Role);
+
+internal sealed record StructuredStateProperty(
+    [property: JsonPropertyName("parameterName")] string ParameterName,
+    [property: JsonPropertyName("emittedName")] string EmittedName);
 
 internal sealed record UnsupportedDeclaration(
     [property: JsonPropertyName("projectKey")] string ProjectKey,
@@ -337,6 +353,24 @@ internal static class ManifestJson
                 RequireString(placeholder, "token");
             }
             RequireStringArray(@event, "parameterForms");
+            foreach (var parameter in RequiredArray(@event, "parameters").EnumerateArray())
+            {
+                RequireObject(parameter, "parameters");
+                RequireString(parameter, "name");
+                RequireString(parameter, "type");
+                RequireString(parameter, "refKind");
+                RequireString(parameter, "role");
+            }
+            foreach (var property in RequiredArray(@event, "structuredState").EnumerateArray())
+            {
+                RequireObject(property, "structuredState");
+                RequireString(property, "parameterName");
+                RequireString(property, "emittedName");
+            }
+            RequireNullableString(@event, "loggerParameter");
+            RequireNullableString(@event, "exceptionParameter");
+            RequireString(@event, "levelSource");
+            RequireNullableString(@event, "levelParameter");
             ValidateJsonSource(@event, "source");
         }
 
@@ -410,6 +444,14 @@ internal static class ManifestJson
         }
     }
 
+    private static void RequireNullableString(JsonElement parent, string name)
+    {
+        if (!parent.TryGetProperty(name, out var value) || value.ValueKind is not (JsonValueKind.String or JsonValueKind.Null))
+        {
+            throw new ManifestValidationException($"The manifest field '{name}' is required and must be a string or null.");
+        }
+    }
+
     private static void RequireStringArray(JsonElement parent, string name)
     {
         foreach (var value in RequiredArray(parent, name).EnumerateArray())
@@ -455,7 +497,7 @@ internal static class ManifestJson
         var eventKeys = new HashSet<string>(StringComparer.Ordinal);
         foreach (var @event in manifest.Events)
         {
-            if (string.IsNullOrWhiteSpace(@event.ProjectKey) || !projectKeys.Contains(@event.ProjectKey) || string.IsNullOrWhiteSpace(@event.Identity) || @event.Identity.Contains("global::", StringComparison.Ordinal) || string.IsNullOrWhiteSpace(@event.ContainingType) || string.IsNullOrWhiteSpace(@event.Method) || @event.GenericArity < 0 || @event.ParameterRefKinds is null || @event.ParameterRefKinds.Count == 0 || @event.ParameterForms is null || @event.ParameterForms.Count == 0 || @event.Placeholders is null || @event.Placeholders.Count > MaxItems || string.IsNullOrWhiteSpace(@event.EventName) || string.IsNullOrEmpty(@event.Message) || !IsEffectiveLevel(@event.Level))
+            if (string.IsNullOrWhiteSpace(@event.ProjectKey) || !projectKeys.Contains(@event.ProjectKey) || string.IsNullOrWhiteSpace(@event.Identity) || @event.Identity.Contains("global::", StringComparison.Ordinal) || string.IsNullOrWhiteSpace(@event.ContainingType) || string.IsNullOrWhiteSpace(@event.Method) || @event.GenericArity < 0 || @event.ParameterRefKinds is null || @event.ParameterRefKinds.Count == 0 || @event.ParameterForms is null || @event.ParameterForms.Count == 0 || @event.Placeholders is null || @event.Placeholders.Count > MaxItems || @event.Parameters is null || @event.Parameters.Count == 0 || @event.StructuredState is null || @event.StructuredState.Count > @event.Parameters.Count || string.IsNullOrWhiteSpace(@event.EventName) || string.IsNullOrEmpty(@event.Message) || !IsEffectiveLevel(@event.Level) || !IsLevelSource(@event.LevelSource))
             {
                 throw new ManifestValidationException("A manifest event is incomplete, non-canonical, or unrelated to a manifest project.");
             }
@@ -490,6 +532,8 @@ internal static class ManifestJson
             {
                 throw new ManifestValidationException("A manifest event parameter form contradicts the required form for its canonical declared type.");
             }
+
+            ValidateEffectiveParameterModel(@event, parsedIdentity);
 
             foreach (var placeholder in @event.Placeholders)
             {
@@ -531,6 +575,115 @@ internal static class ManifestJson
     }
 
     private static bool IsEffectiveLevel(string? level) => level is "Trace" or "Debug" or "Information" or "Warning" or "Error" or "Critical" or "None" or "Dynamic" || int.TryParse(level, out _);
+
+    private static bool IsLevelSource(string? source) => source is "Fixed" or "Dynamic";
+
+    private static void ValidateEffectiveParameterModel(EventContract @event, ParsedMethodIdentity identity)
+    {
+        if (@event.Parameters.Count != identity.Parameters.Count || @event.ParameterRefKinds.Count != @event.Parameters.Count || @event.ParameterForms.Count != @event.Parameters.Count)
+        {
+            throw new ManifestValidationException("A manifest event effective parameter model does not match its canonical identity.");
+        }
+
+        var names = new HashSet<string>(StringComparer.Ordinal);
+        var loggerCount = 0;
+        var exceptionCount = 0;
+        var dynamicLevelCount = 0;
+        string? loggerParameter = null;
+        string? exceptionParameter = null;
+        string? levelParameter = null;
+        var allowedRoles = new HashSet<string>(["Logger", "Exception", "DynamicLevel", "State"], StringComparer.Ordinal);
+
+        for (var index = 0; index < @event.Parameters.Count; index++)
+        {
+            var parameter = @event.Parameters[index];
+            var identityParameter = identity.Parameters[index];
+            if (string.IsNullOrWhiteSpace(parameter.Name) || !IsCanonicalIdentifier(parameter.Name) || !names.Add(parameter.Name) ||
+                !string.Equals(parameter.Type, identityParameter.Type, StringComparison.Ordinal) ||
+                !string.Equals(parameter.RefKind, identityParameter.RefKind, StringComparison.Ordinal) ||
+                !ParameterRefKinds.Contains(parameter.RefKind) || !allowedRoles.Contains(parameter.Role))
+            {
+                throw new ManifestValidationException("A manifest event effective parameter model contains an invalid or contradictory parameter.");
+            }
+
+            switch (parameter.Role)
+            {
+                case "Logger":
+                    loggerCount++;
+                    loggerParameter = parameter.Name;
+                    break;
+                case "Exception":
+                    exceptionCount++;
+                    exceptionParameter = parameter.Name;
+                    break;
+                case "DynamicLevel":
+                    dynamicLevelCount++;
+                    levelParameter = parameter.Name;
+                    break;
+            }
+        }
+
+        if (loggerCount != 1 || exceptionCount > 1 || dynamicLevelCount > 1 || !string.Equals(@event.LoggerParameter, loggerParameter, StringComparison.Ordinal) || !string.Equals(@event.ExceptionParameter, exceptionParameter, StringComparison.Ordinal))
+        {
+            throw new ManifestValidationException("A manifest event effective parameter model has inconsistent special-parameter roles.");
+        }
+
+        if (@event.LevelSource == "Dynamic")
+        {
+            if (!string.Equals(@event.Level, "Dynamic", StringComparison.Ordinal) || dynamicLevelCount != 1 || !string.Equals(@event.LevelParameter, levelParameter, StringComparison.Ordinal))
+            {
+                throw new ManifestValidationException("A manifest event dynamic level source is inconsistent with its parameter roles.");
+            }
+        }
+        else if (@event.LevelParameter is not null || dynamicLevelCount != 0)
+        {
+            throw new ManifestValidationException("A manifest event fixed level source cannot have a dynamic level parameter.");
+        }
+
+        var parameterIndexes = @event.Parameters.Select((parameter, index) => (parameter.Name, index)).ToDictionary(item => item.Name, item => item.index, StringComparer.Ordinal);
+        var parametersByName = @event.Parameters.ToDictionary(parameter => parameter.Name, StringComparer.OrdinalIgnoreCase);
+        var structuredNames = new HashSet<string>(StringComparer.Ordinal);
+        var lastIndex = -1;
+        foreach (var property in @event.StructuredState)
+        {
+            if (string.IsNullOrWhiteSpace(property.ParameterName) || string.IsNullOrWhiteSpace(property.EmittedName) || !structuredNames.Add(property.ParameterName) ||
+                !parameterIndexes.TryGetValue(property.ParameterName, out var index) || index <= lastIndex ||
+                (@event.Parameters[index].Role is not ("State" or "Exception")))
+            {
+                throw new ManifestValidationException("A manifest structured state model contains an invalid or out-of-order property.");
+            }
+
+            var parameter = @event.Parameters[index];
+            var expectedEmittedName = @event.Placeholders.FirstOrDefault(placeholder => string.Equals(placeholder.Name, parameter.Name, StringComparison.OrdinalIgnoreCase))?.Name ?? parameter.Name;
+            if (!string.Equals(property.EmittedName, expectedEmittedName, StringComparison.Ordinal))
+            {
+                throw new ManifestValidationException("A manifest structured state model has an emitted name that contradicts its template or parameter name.");
+            }
+
+            lastIndex = index;
+        }
+
+        foreach (var placeholder in @event.Placeholders)
+        {
+            if (!parametersByName.TryGetValue(placeholder.Name, out var parameter))
+            {
+                throw new ManifestValidationException("A manifest placeholder does not match a method parameter.");
+            }
+            if (parameter.Role is "Logger" or "DynamicLevel")
+            {
+                throw new ManifestValidationException("A manifest placeholder references a generator-special parameter outside the supported declaration scope.");
+            }
+        }
+
+        var expectedStateParameters = @event.Parameters
+            .Where(parameter => parameter.Role == "State" || parameter.Role == "Exception" && @event.Placeholders.Any(placeholder => string.Equals(placeholder.Name, parameter.Name, StringComparison.OrdinalIgnoreCase)))
+            .Select(parameter => parameter.Name)
+            .ToHashSet(StringComparer.Ordinal);
+        if (!expectedStateParameters.SetEquals(structuredNames))
+        {
+            throw new ManifestValidationException("A manifest structured state model does not match the effective state parameter set.");
+        }
+    }
 
     private static ParsedMethodIdentity ParseMethodIdentity(string identity)
     {

@@ -6,7 +6,7 @@ This document describes the committed fixtures used to validate LogSchema's desi
 
 - `phase0/` is a non-packable feasibility probe. It exercises direct MSBuild/Roslyn extraction and remains useful for detecting changes to the underlying project-loading assumptions.
 - `src/KeelMatrix.LogSchema.Core/` is the shipping extractor used by the packaged `logschema` tool. `build/Test-ShippingMatrix.ps1` runs the semantic fixture matrix against this implementation.
-- `build/validate.ps1` runs both matrices and then installs the built NuGet tool through a local tool manifest for consumer-level `capture`, `check`, and `diff` tests.
+- `build/validate.ps1` runs both matrices, grounds the effective state model against emitted source from the pinned Microsoft generator, and then installs the built NuGet tool through a local tool manifest for consumer-level `capture`, `check`, and `diff` tests.
 
 Success of the feasibility probe alone is not evidence that the shipping implementation behaves correctly.
 
@@ -26,13 +26,13 @@ Each ordinary project contains an execution sentinel. Successful design-time cap
 
 `build/Test-ShippingMatrix.ps1` uses the built shipping assembly and checks that:
 
-- all supported declarations in the ordinary fixtures are captured with the expected effective EventId, EventName, level, placeholder, parameter, nested-type, Unicode, and source-provenance values;
+- all supported declarations in the ordinary fixtures are captured with the expected effective EventId, EventName, level source, message-template occurrences, generator-effective parameter roles, structured-state properties, nested-type, Unicode, and source-provenance values;
 - unsupported declarations remain explicit and the manifest reports incomplete coverage;
 - repeated captures are byte-identical;
 - the multi-targeted fixture is evaluated independently for each selected target framework;
 - ambiguous source/generated pairing returns exit code 3 with `KMLOGP001` and `KMLOGP005` and does not write a baseline.
 
-The installed-tool smoke is a separate gate. It creates a local tool manifest, installs the newly packed `KeelMatrix.LogSchema` package from an isolated feed and cache, copies only the manifest into a fresh checkout directory, runs `dotnet tool restore`, and invokes every command through `dotnet tool run logschema`. Its fail-closed matrix tampers each redundant event-identity dimension independently, including additive values. A packaged type-by-form matrix covers `ILogger`, `LogLevel`, exact `System.Exception`, a non-suffix derived exception, an ordinary custom type, and `string` at every vector position through both `check` and `diff`; the matrix contains 24 canonical cells and invalid rows include symmetric forged-vs-forged comparisons. A separate packaged authenticity self-diff rejects escaped identifiers, trivia/whitespace, wrong-arity `ILogger` types, and generic-rooted nested members. Every rejected row must return the JSON analysis-error envelope, `coverageComplete: false`, and exit code 3 without an absolute path or stack trace. A separate comparison-originated analysis error proves the same envelope. Exact `System.Exception`, non-suffix derived exception, and ordinary custom-type events are captured and round-trip cleanly; the derived exception keeps its declared type with form `None` and remains excluded from message placeholders by capture-time semantic analysis.
+The installed-tool smoke is a separate gate. It creates a local tool manifest, installs the newly packed `KeelMatrix.LogSchema` package from an isolated feed and cache, copies only the manifest into a fresh checkout directory, runs `dotnet tool restore`, and invokes every command through `dotnet tool run logschema`. Its fail-closed matrix tampers each redundant event-identity dimension independently, including additive values. A packaged type-by-form matrix covers `ILogger`, `LogLevel`, exact `System.Exception`, a non-suffix derived exception, an ordinary custom type, and `string` at every vector position through both `check` and `diff`; the matrix contains 24 canonical cells and invalid rows include symmetric forged-vs-forged comparisons. A separate packaged authenticity self-diff rejects escaped identifiers, trivia/whitespace, wrong-arity `ILogger` types, and generic-rooted nested members. Every rejected row must return the JSON analysis-error envelope, `coverageComplete: false`, and exit code 3 without an absolute path or stack trace. A separate comparison-originated analysis error proves the same envelope. Exact `System.Exception`, non-suffix derived exception, and ordinary custom-type events are captured and round-trip cleanly; the derived exception keeps its declared type with form `None` while source analysis preserves its generator-effective role.
 
 ## Reproduce
 
@@ -41,6 +41,7 @@ From the repository root after restore and a Release build:
 ```powershell
 pwsh -NoProfile -File ./build/Test-Phase0Matrix.ps1
 pwsh -NoProfile -File ./build/Test-ShippingMatrix.ps1
+pwsh -NoProfile -File ./build/Test-GeneratorStateGrounding.ps1
 ```
 
 The complete repository gate is:
