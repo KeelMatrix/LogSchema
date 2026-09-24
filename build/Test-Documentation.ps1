@@ -41,7 +41,7 @@ Assert-That ($security -match 'recomputes every parameter form\s+solely from the
 Assert-That ($security -notmatch 'current supported release line is v1') 'supported security versions must not use the obsolete v1 line'
 
 $diagnostics = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot 'COMPATIBILITY-RULES.md')
-foreach ($number in 1..7) {
+foreach ($number in 1..8) {
     $code = 'KMLOGP{0:D3}' -f $number
     Assert-That ($diagnostics -match [regex]::Escape($code)) "the diagnostic reference must document $code"
 }

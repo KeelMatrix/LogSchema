@@ -6,7 +6,7 @@ KeelMatrix.LogSchema analyzes local source projects and manifests. Version `0.1.
 
 `capture` reads design-time project and source information through MSBuild/Roslyn and writes the requested manifest. `check` reads the target project and baseline. `diff` reads only the two supplied manifests. The tool may create a temporary manifest file beside the requested output while completing an atomic write; it removes that temporary file and does not create a background service.
 
-Manifests contain developer-selected operational vocabulary, including project and assembly names, type and method identities, event names, templates, placeholder names, and project-relative source locations. Review a manifest like source code before committing or sharing it.
+Manifests contain developer-selected operational vocabulary, including project and assembly names, type and method identities, event names, templates, placeholder names, and logical source locations. Source locations use deterministic `project/`, `external/up-N/`, or `generated/` identities without absolute checkout roots; review a manifest like source code before committing or sharing it.
 
 ## Network behavior
 

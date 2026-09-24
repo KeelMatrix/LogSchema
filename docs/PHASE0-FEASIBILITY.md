@@ -26,9 +26,11 @@ Each ordinary project contains an execution sentinel. Successful design-time cap
 
 `build/Test-ShippingMatrix.ps1` uses the built shipping assembly and checks that:
 
-- all supported declarations in the ordinary fixtures are captured with the expected effective EventId, EventName, level source, message-template occurrences, generator-effective parameter roles, structured-state properties, nested-type, Unicode, and source-provenance values;
+- all supported declarations in the ordinary fixtures are captured with the expected effective EventId, EventName, level source, message-template occurrences, generator-effective parameter roles, structured-state properties, nested-type, Unicode, and logical source-provenance values;
+- source-provenance regressions preserve linked outside-project documents, dot-prefixed names, separator equivalence, generator/hint identity, and checkout-root independence; collisions fail closed with `KMLOGP008`;
 - unsupported declarations remain explicit and the manifest reports incomplete coverage;
 - repeated captures are byte-identical;
+- equivalent fixture checkouts at different absolute roots produce byte-identical manifests with only logical source provenance;
 - the multi-targeted fixture is evaluated independently for each selected target framework;
 - ambiguous source/generated pairing returns exit code 3 with `KMLOGP001` and `KMLOGP005` and does not write a baseline.
 
@@ -57,4 +59,4 @@ The public CI workflow runs the complete gate on Windows, Linux, and macOS with 
 - Project loading uses design-time MSBuild and Roslyn semantic models. It does not load or invoke target assemblies, but MSBuild project evaluation itself is a local trust boundary.
 - V1 support is limited to the documented `LoggerMessageAttribute` declaration shape. Manual logging calls and arbitrary third-party generators are outside scope.
 - A multi-targeted project must be evaluated with an explicit `--tfm` when framework selection affects its compilation.
-- Compilation errors, workspace failures, ambiguous identities, unsupported declarations during comparison, and zero supported events fail closed through the documented `KMLOGP001`-`KMLOGP007` analysis diagnostics.
+- Compilation errors, workspace failures, ambiguous identities, unsafe/colliding source provenance, unsupported declarations during comparison, and zero supported events fail closed through the documented `KMLOGP001`-`KMLOGP008` analysis diagnostics.
