@@ -35,7 +35,7 @@ public sealed class ExtractorTests
     }
 
     [Fact]
-    public async Task InstalledToolPreservesDynamicToFixedLevelTransition()
+    public async Task ShippingExtractorPreservesDynamicToFixedLevelTransition()
     {
         var projectPath = FindRepositoryFile("tests", "PackageConsumerFixture", "PackageConsumerFixture.csproj");
         var projectDirectory = Path.GetDirectoryName(projectPath)!;

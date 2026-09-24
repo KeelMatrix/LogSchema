@@ -297,7 +297,7 @@ Options:
   --severity breaking|warning|all
                            Set the exit-code gate; default is breaking.
   --accept <code>          Explicitly accept a diagnostic code without rewriting a baseline.
-  --no-telemetry           Reserved v1 opt-out; v1 emits no telemetry.
+  --no-telemetry           Reserved v1 opt-out; v1 contains no telemetry client.
   --tfm <target-framework> Select a target framework for multi-targeted projects.
   --help                   Show this help.
 

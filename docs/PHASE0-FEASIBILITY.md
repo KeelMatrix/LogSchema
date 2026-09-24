@@ -1,174 +1,59 @@
-# Phase 0 feasibility gate
+# Semantic fixture and project-loading validation
 
-Status: bounded prototype evidence updated for the declaration-pairing,
-identity, and execution-boundary findings. Independent re-verification remains
-required. This milestone contains no shipping CLI, comparison engine, package
-project, or telemetry integration.
+This document describes the committed fixtures used to validate LogSchema's design-time project-loading boundary. It distinguishes the historical feasibility probe from the shipping extractor so either implementation can be reproduced without treating one as evidence for the other.
 
-Implementation candidate SHA for this evidence set:
-`aec7790b356628cba0199ec92c28654e6b8084f2`
+## Implementations
 
-## Verdict rule and evidence standard
+- `phase0/` is a non-packable feasibility probe. It exercises direct MSBuild/Roslyn extraction and remains useful for detecting changes to the underlying project-loading assumptions.
+- `src/KeelMatrix.LogSchema.Core/` is the shipping extractor used by the packaged `logschema` tool. `build/Test-ShippingMatrix.ps1` runs the semantic fixture matrix against this implementation.
+- `build/validate.ps1` runs both matrices and then installs the built NuGet tool through a local tool manifest for consumer-level `capture`, `check`, and `diff` tests.
 
-Specification section 30 defines the gate:
+Success of the feasibility probe alone is not evidence that the shipping implementation behaves correctly.
 
-> Pass: Canonical manifests are stable across repeated machines/build directories, every supported declaration is extracted correctly, and no target application code needs to execute.
+## Fixture matrix
 
-> Fail: Extraction requires brittle generated-source scraping, silently omits supported declarations, or requires executing arbitrary target application code.
-
-This document records evidence against that rule. It does not claim a formal
-proof of absence. The evidence standard is:
-
-- the probe uses design-time-only MSBuild evaluation with
-  `DesignTimeBuild=true` and `BuildingProject=false`;
-- the probe has no target-assembly load, invocation, or process-start path;
-- each probe fixture has a reachable `[ModuleInitializer]` sentinel that would
-  throw if the fixture assembly were loaded and initialized;
-- a separate controlled child-process test deliberately loads and initializes
-  a sentinel-only fixture and observes `Target application code executed.`.
-
-The controlled load test validates the sentinel itself. It does not change the
-probe or use the sentinel as an extraction mechanism.
-
-## Semantic loading boundary
-
-The probe uses `MSBuildLocator.RegisterDefaults`,
-`MSBuildWorkspace.Create`, `OpenProjectAsync`,
-`Project.GetCompilationAsync`, document semantic models, declared symbols, and
-compile-time attribute values. Project documents are the provenance boundary:
-their declarations remain source declarations even when a filename ends in
-`.g.cs` or a merged symbol has `GeneratedCodeAttribute`.
-
-Compilation syntax trees that are not project documents are inspected only for
-generated output. A generated implementation is paired only when its stable
-method identity has exactly one project-source declaration. Ambiguous or
-unpaired cases are retained in `unsupported` and/or `analysisIssues`; they are
-not removed by count-based deduplication.
-
-The source audit in `build/Test-Phase0Matrix.ps1` checks that `phase0/Program.cs`
-contains no `Assembly.Load`, `Assembly.LoadFrom`, `Process.Start`,
-`GetEntryAssembly`, or target-assembly invocation path. It also checks the
-design-time workspace options and the reachable module-initializer sentinels.
-
-## Pairing-boundary fixture coverage
-
-`fixtures/Phase0.Pairing` is a committed synthetic fixture. Its assertions in
-`build/Test-Phase0Matrix.ps1` cover:
-
-| Case | Result |
+| Fixture | Purpose |
 | --- | --- |
-| Same stable method identity in `Separate/First.cs` and `Separate/Second.cs` | Both source declarations retained; `KMLOGP001` error emitted; generated pairing is not guessed. |
-| Same stable method identity twice in `SameDocument.cs` | Both source declarations retained; `KMLOGP001` error emitted. |
-| Source-generator-produced `[LoggerMessage]` declaration in `generated/Unpaired.LoggerMessage.g.cs` with no project-source counterpart | Explicitly reported in `unsupported`; `KMLOGP002` warning emitted. |
-| Built-in generated implementations for ambiguous identities | Explicitly reported as unpaired/ambiguous instead of being silently discarded. |
+| `fixtures/Phase0.Net8` | `net8.0` declarations with constants, constructor and named attribute arguments, default and explicit EventName values, escaped placeholders, format specifiers, Unicode, nested and instance types, and explicit unsupported declarations. |
+| `fixtures/Phase0.Stable` | The same declaration matrix targeting `net10.0`. |
+| `fixtures/Phase0.Multi` | The same source evaluated separately for `net8.0` and `net10.0`. |
+| `fixtures/Phase0.Pairing` | Duplicate source identities, ref-kind and generic-arity identity dimensions, and an unpaired generated declaration. The shipping extractor must fail closed rather than guess a pairing. |
+| `fixtures/Phase0.Sentinel` | A controlled assembly-load sentinel used only to prove that the sentinel fails if deliberately initialized. |
 
-The fixture also includes ref-kind overloads and generic-arity variants. The
-source generator is in `fixtures/Phase0.GeneratedDeclarationGenerator`; its
-Debug output is built by the narrow matrix test before the MSBuild/Roslyn
-probe loads the pairing project.
+Each ordinary project contains an execution sentinel. Successful design-time capture demonstrates that the extractor did not load and initialize the target assembly during the matrix. This does not sandbox MSBuild evaluation: projects remain trusted local input, and callers should isolate untrusted projects.
 
-## Identity and source-location rule
+## Shipping assertions
 
-`GetDeclarationKey` now uses this stable shape:
+`build/Test-ShippingMatrix.ps1` uses the built shipping assembly and checks that:
 
-```text
-<fully-qualified containing type>.<method>`<generic arity>(<ref-kind>:<type>,...)
-```
+- all supported declarations in the ordinary fixtures are captured with the expected effective EventId, EventName, level, placeholder, parameter, nested-type, Unicode, and source-provenance values;
+- unsupported declarations remain explicit and the manifest reports incomplete coverage;
+- repeated captures are byte-identical;
+- the multi-targeted fixture is evaluated independently for each selected target framework;
+- ambiguous source/generated pairing returns exit code 3 with `KMLOGP001` and `KMLOGP005` and does not write a baseline.
 
-Every parameter includes its `RefKind`, and the method's generic arity is
-included even for arity zero. Extracted events additionally record
-`genericArity` and `parameterRefKinds`. Regression assertions distinguish the
-`None` and `Ref` overloads and distinguish generic arities 1 and 2.
+The installed-tool smoke is a separate gate. It creates a local tool manifest, installs the newly packed `KeelMatrix.LogSchema` package from an isolated feed and cache, copies only the manifest into a fresh checkout directory, runs `dotnet tool restore`, and invokes every command through `dotnet tool run logschema`.
 
-Recorded project-source locations are normalized project-relative paths with
-forward slashes. The nested pairing fixture proves this with
-`Separate/First.cs` and `Separate/Second.cs`. Generated locations use the
-canonical virtual project-relative prefix `generated/` so build-directory
-paths cannot enter a manifest.
+## Reproduce
 
-## Windows matrix evidence
+From the repository root after restore and a Release build:
 
-The final narrow matrix command was:
-
-```text
+```powershell
 pwsh -NoProfile -File ./build/Test-Phase0Matrix.ps1
+pwsh -NoProfile -File ./build/Test-ShippingMatrix.ps1
 ```
 
-It passed in 25.60 seconds. The command output included these durations:
+The complete repository gate is:
 
-```text
-Build pairing generator: 0.96s
-Probe net8: 4.40s
-Probe stable: 4.48s
-Probe multi-net8: 4.38s
-Probe multi-net10: 4.53s
-Probe pairing: 4.77s
-Build sentinel fixture: 1.02s
-Controlled sentinel load: 0.34s
-Phase 0 matrix regression test passed.
-```
-
-The four Windows manifests from the final validation run are:
-
-| Fixture / target | SHA-256 |
-| --- | --- |
-| `Phase0.Net8` / `net8.0` | `0CF8E71D3C93A9DDFD1E9334AF5F1F509262B8ABB1A72673EDFE18C49A718B85` |
-| `Phase0.Stable` / `net10.0` | `481C129059A595F51500E7755F1895196E501159D21804E55AA22586679DB23B` |
-| `Phase0.Multi` / `net8.0` | `724A0BEDD512C16CB0D9D68B77F6CDB8E9FCF78A83A323681CB490D6BD74D29A` |
-| `Phase0.Multi` / `net10.0` | `93EAA480B7C199B30F563DFE0F502575F002E99508990B01A1711444113B9EF8` |
-
-The same four hashes were stable across two distinct final Windows output
-directories. Each ordinary fixture reports 15 extracted declarations
-and 3 explicit unsupported declarations.
-
-The repeated-output commands used the same probe invocation with output paths
-under `artifacts/determinism-final-a` and `artifacts/determinism-final-b`:
-
-```text
-dotnet phase0/bin/Release/net10.0/Phase0.LogSchemaProbe.dll fixtures/Phase0.Net8/Phase0.Net8.csproj --output artifacts/determinism-final-{a|b}/net8.json --tfm net8.0
-dotnet phase0/bin/Release/net10.0/Phase0.LogSchemaProbe.dll fixtures/Phase0.Stable/Phase0.Stable.csproj --output artifacts/determinism-final-{a|b}/stable.json --tfm net10.0
-dotnet phase0/bin/Release/net10.0/Phase0.LogSchemaProbe.dll fixtures/Phase0.Multi/Phase0.Multi.csproj --output artifacts/determinism-final-{a|b}/multi-net8.json --tfm net8.0
-dotnet phase0/bin/Release/net10.0/Phase0.LogSchemaProbe.dll fixtures/Phase0.Multi/Phase0.Multi.csproj --output artifacts/determinism-final-{a|b}/multi-net10.json --tfm net10.0
-```
-
-The eight individual command durations were `a/net8 6.66s`, `a/stable
-6.43s`, `a/multi-net8 6.60s`, `a/multi-net10 5.17s`, `b/net8 5.99s`,
-`b/stable 6.76s`, `b/multi-net8 7.04s`, and `b/multi-net10 6.64s`; all four
-comparisons reported `MATCH`.
-
-## Linux evidence
-
-Linux parity is verified with the pinned Ubuntu SDK `10.0.401`. The Linux
-run exited `0`, and the generated net8 manifest SHA-256 matched the Windows
-value `0CF8E71D3C93A9DDFD1E9334AF5F1F509262B8ABB1A72673EDFE18C49A718B85`.
-
-macOS parity is verified by [public CI run 35874369927](https://github.com/KeelMatrix/LogSchema/actions/runs/35874369927), whose macOS leg exited `0` with the pinned SDK `10.0.401`.
-
-## Full validation evidence
-
-The final validation command was:
-
-```text
+```powershell
 pwsh -NoProfile -File ./build/validate.ps1
 ```
 
-It returned exit code 0 in 30.13 seconds. Step timings were:
+The public CI workflow runs the complete gate on Windows, Linux, and macOS with the SDK pinned in `global.json`.
 
-```text
-Restore probe: 1.58s
-Restore net8 fixture: 1.29s
-Restore stable fixture: 1.30s
-Restore multi-target fixture: 1.38s
-Restore pairing fixture: 1.13s
-Restore sentinel fixture: 1.05s
-Build probe: 1.95s
-Probe net8: 4.99s
-Probe stable SDK fixture: 5.33s
-Probe multi-target net8: 4.99s
-Probe multi-target net10: 4.65s
-```
+## Technical limitations
 
-The public CI workflow runs the restore, Release build, tests, Phase 0 matrix,
-manifest determinism, package reproducibility, and isolated package-consumer
-smoke on Ubuntu, Windows, and macOS. This Phase 0 prototype remains
-non-packable, so it has no package icon path of its own.
+- Project loading uses design-time MSBuild and Roslyn semantic models. It does not load or invoke target assemblies, but MSBuild project evaluation itself is a local trust boundary.
+- V1 support is limited to the documented `LoggerMessageAttribute` declaration shape. Manual logging calls and arbitrary third-party generators are outside scope.
+- A multi-targeted project must be evaluated with an explicit `--tfm` when framework selection affects its compilation.
+- Compilation errors, workspace failures, ambiguous identities, unsupported declarations during comparison, and zero supported events fail closed through the documented `KMLOGP001`-`KMLOGP007` analysis diagnostics.

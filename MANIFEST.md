@@ -14,7 +14,7 @@ The default file is `logschema.json`. The top-level `schemaVersion` is an intege
 
 Manifests are UTF-8 without a BOM, use invariant culture for numeric and enum values, and end with one LF. Every list is sorted with ordinal comparison: projects by key; events by project key then identity; unsupported declarations by project key, source file, line, and declaration key; analysis issues by project key, code, and declaration key; diagnostic-kind lists ordinally. Project source paths are relative to the project directory, use `/`, and generated paths use `generated/<file-name>`. Absolute paths, drive letters, and backslashes are not emitted.
 
-The serializer normalizes line endings in declaration text and JSON output. Source content is never read into telemetry or used to derive an absolute path. The same source and selected target framework therefore produce byte-identical output regardless of checkout/output directory, line-ending checkout, or host path separator.
+The serializer normalizes line endings in declaration text and JSON output. V1 contains no telemetry client, so source and manifest content remain local. Source provenance is project-relative and is never used to emit an absolute path. The same source and selected target framework therefore produce byte-identical output regardless of checkout/output directory, line-ending checkout, or host path separator.
 
 ## Parsing safety and compatibility
 
@@ -26,4 +26,4 @@ Unsupported declarations are retained with their identities and reasons. `check`
 
 ## Trust boundary
 
-Capture uses design-time MSBuild/Roslyn semantic loading. It does not use `Assembly.Load`, invoke target methods, or inspect runtime logging. MSBuild project evaluation remains a local-machine trust boundary; project restore and SDK installation occur outside normal offline analysis.
+Capture uses design-time MSBuild/Roslyn semantic loading. It does not use `Assembly.Load`, invoke target methods, or inspect runtime logging. MSBuild project evaluation remains a local-machine trust boundary; project restore, local-tool restore, and SDK installation occur before normal offline analysis. The tool requires the .NET 8 runtime and project loading is verified with .NET SDK `10.0.401`.

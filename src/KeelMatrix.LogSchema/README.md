@@ -9,17 +9,35 @@ The recommended installation is a repository-pinned local tool manifest:
 ```bash
 dotnet new tool-manifest
 dotnet tool install KeelMatrix.LogSchema
-logschema capture MyService.csproj --output logschema.json
+dotnet tool run logschema capture MyService.csproj --output logschema.json
+dotnet tool run logschema check MyService.csproj --baseline logschema.json
 ```
 
-For just trying it, use `dotnet tool install --global KeelMatrix.LogSchema` immediately below the local-manifest path. Then run `logschema check MyService.csproj --baseline logschema.json` in CI. `logschema diff old.json new.json` compares manifests offline.
+Commit `dotnet-tools.json` and the reviewed baseline. On a fresh checkout, restore the manifest-pinned version before running LogSchema:
+
+```bash
+dotnet tool restore
+dotnet tool run logschema check MyService.csproj --baseline logschema.json
+```
+
+The tool requires the .NET 8 runtime. Project loading requires a full .NET SDK/MSBuild installation; v1 is verified with SDK `10.0.401`, including `net8.0` and `net10.0` fixtures. Restore the target project with that SDK before analysis.
+
+### Global tool alternative
+
+For a disposable trial, keep the global installation path separate:
+
+```bash
+dotnet tool install --global KeelMatrix.LogSchema
+logschema capture MyService.csproj --output logschema.json
+logschema check MyService.csproj --baseline logschema.json
+```
 
 ## Quick start
 
 ```bash
-logschema capture MyService.csproj --output logschema.json
-logschema check MyService.csproj --baseline logschema.json
-logschema diff old.json new.json
+dotnet tool run logschema capture MyService.csproj --output logschema.json
+dotnet tool run logschema check MyService.csproj --baseline logschema.json
+dotnet tool run logschema diff old.json new.json
 ```
 
 The log contract is the effective EventId, EventName, level, template, and ordered structured placeholder shape of a supported partial void method using `LoggerMessageAttribute`. An omitted EventId follows the pinned generator's deterministic default, an omitted EventName follows the method name, and a level supplied by a `LogLevel` parameter is recorded as `Dynamic` rather than `None`. V1 reads C# projects through design-time MSBuild/Roslyn, does not execute target code, and reports unsupported declarations explicitly.
@@ -41,15 +59,15 @@ Structured identity fields use exact ordinal, case-sensitive comparison. A case-
 
 See the repository [compatibility rules](https://github.com/KeelMatrix/LogSchema/blob/main/COMPATIBILITY-RULES.md) and [manifest schema](https://github.com/KeelMatrix/LogSchema/blob/main/MANIFEST.md) for the complete stable-code and schema contracts.
 
-Options: `--format text|json`, `--severity breaking|warning|all`, `--accept <code>`, `--no-telemetry`, and `--tfm <target-framework>`. Exit codes are 0 clean, 1 gated findings, 2 invalid invocation/configuration, and 3 project-load or analysis failure. V1 emits no telemetry; `--no-telemetry` is reserved and accepted.
+Options: `--format text|json`, `--severity breaking|warning|all`, `--accept <code>`, `--no-telemetry`, and `--tfm <target-framework>`. Exit codes are 0 clean, 1 gated findings, 2 invalid invocation/configuration, and 3 project-load or analysis failure. V1 contains no telemetry client; `--no-telemetry` is reserved and accepted.
 
 The tool reads SDK-style C# projects through design-time MSBuild/Roslyn APIs. It does not execute target application code, inspect runtime logs, or replace secret/redaction tooling. After restore, analysis is local and does not require a hosted service.
 
 ## Platform support
 
-The tool is supported on Windows, Linux, and macOS. The public CI matrix verified all three platforms in [CI run 35874369927](https://github.com/KeelMatrix/LogSchema/actions/runs/35874369927) using the SDK pinned in `global.json`.
+The tool is supported on Windows, Linux, and macOS. The public CI matrix installs the built package through a local tool manifest and runs `capture`, `check`, and `diff` on all three platforms with SDK `10.0.401`.
 
-For troubleshooting and the full supported declaration scope, see the [repository README](https://github.com/KeelMatrix/LogSchema/blob/main/README.md), [compatibility rules](https://github.com/KeelMatrix/LogSchema/blob/main/COMPATIBILITY-RULES.md), and [manifest schema](https://github.com/KeelMatrix/LogSchema/blob/main/MANIFEST.md).
+For troubleshooting and the full supported declaration scope, see the [repository README](https://github.com/KeelMatrix/LogSchema/blob/main/README.md), [compatibility rules](https://github.com/KeelMatrix/LogSchema/blob/main/COMPATIBILITY-RULES.md), [manifest schema](https://github.com/KeelMatrix/LogSchema/blob/main/MANIFEST.md), and [privacy statement](https://github.com/KeelMatrix/LogSchema/blob/main/PRIVACY.md).
 
 ## License
 

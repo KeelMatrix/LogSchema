@@ -97,6 +97,72 @@ public sealed class ManifestJsonTests
     }
 
     [Fact]
+    public async Task RepresentativeLargeManifestRoundTripsWithinResourceLimits()
+    {
+        const int eventCount = 4_000;
+        var root = Directory.CreateTempSubdirectory("logschema-large-");
+        var path = Path.Combine(root.FullName, "large.json");
+        var events = Enumerable.Range(0, eventCount)
+            .Select(index => new EventContract(
+                "Large|net8.0",
+                $"Large.Logging.Event{index}`0(None:Microsoft.Extensions.Logging.ILogger,None:int)",
+                "Large.Logging",
+                $"Event{index}",
+                0,
+                ["None", "None"],
+                index,
+                $"Event{index}",
+                "Information",
+                $"Processed {{Value{index}}}",
+                [new Placeholder($"Value{index}", $"Value{index}")],
+                ["ILogger", "ordinary"],
+                new SourceLocation($"Logging/Event{index}.cs", index + 1, "source")))
+            .ToArray();
+        var manifest = new ManifestDocument(
+            1,
+            [new ProjectIdentity("Large|net8.0", "Large", "Large", "net8.0")],
+            events,
+            [],
+            [],
+            [],
+            []);
+
+        try
+        {
+            await ManifestJson.WriteAsync(manifest, path, CancellationToken.None);
+            var length = new FileInfo(path).Length;
+            Assert.InRange(length, 1, ManifestJson.MaxBytes);
+
+            var roundTripped = await ManifestJson.ReadAsync(path, CancellationToken.None);
+            Assert.Equal(eventCount, roundTripped.Events.Count);
+            Assert.Contains(roundTripped.Events, item => item.Method == "Event0");
+            Assert.Contains(roundTripped.Events, item => item.Method == $"Event{eventCount - 1}");
+        }
+        finally
+        {
+            root.Delete(true);
+        }
+    }
+
+    [Fact]
+    public async Task ExcessiveJsonDepthFailsClosed()
+    {
+        var root = Directory.CreateTempSubdirectory("logschema-depth-");
+        var path = Path.Combine(root.FullName, "deep.json");
+        var nested = new string('[', 40) + "0" + new string(']', 40);
+        await File.WriteAllTextAsync(path, "{\"schemaVersion\":1,\"projects\":[],\"events\":[],\"unsupported\":[],\"analysisIssues\":[],\"compilationDiagnosticKinds\":[],\"workspaceDiagnosticKinds\":[],\"extra\":" + nested + "}");
+
+        try
+        {
+            await Assert.ThrowsAsync<ManifestReadException>(() => ManifestJson.ReadAsync(path, CancellationToken.None));
+        }
+        finally
+        {
+            root.Delete(true);
+        }
+    }
+
+    [Fact]
     public async Task MissingRequiredArraysAndEventFieldsFailClosed()
     {
         var root = Directory.CreateTempSubdirectory("logschema-incomplete-");

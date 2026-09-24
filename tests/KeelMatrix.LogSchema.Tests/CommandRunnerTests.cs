@@ -14,6 +14,7 @@ public sealed class CommandRunnerTests
         Assert.Equal(0, exitCode);
         Assert.Contains("logschema capture", output.ToString(), StringComparison.Ordinal);
         Assert.Contains("--no-telemetry", output.ToString(), StringComparison.Ordinal);
+        Assert.Contains("contains no telemetry client", output.ToString(), StringComparison.Ordinal);
         Assert.Empty(errors.ToString());
     }
 

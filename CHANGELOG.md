@@ -4,10 +4,6 @@ Changes for the KeelMatrix.LogSchema package are recorded here using the Keep a 
 
 ## [Unreleased]
 
-### Changed
-
-- Added public CI validation for Windows, Linux, and macOS using the SDK pinned in `global.json`; [CI run 35874369927](https://github.com/KeelMatrix/LogSchema/actions/runs/35874369927) verified all three legs.
-
 ### Added
 
 - Deterministic schema-v1 manifests for supported source-generated `LoggerMessage` declarations.
@@ -19,3 +15,4 @@ Changes for the KeelMatrix.LogSchema package are recorded here using the Keep a 
 - Exact ordinal structured-identity comparison, including case-only placeholder renames as breaking `KMLOG102` findings.
 - Fail-closed `KMLOGP006` handling for zero supported events, with no baseline written by `capture` and zero-event baselines rejected by `check`.
 - Byte-deterministic `.nupkg` and `.snupkg` output across canonical-repository attached, detached, and alternate-directory checkouts, plus repeated-pack validation and an LF line-ending checkout contract.
+- Repository-pinned local tool installation and restore instructions, with installed `capture`, `check`, and `diff` validation on Windows, Linux, and macOS.

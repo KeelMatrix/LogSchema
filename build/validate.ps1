@@ -276,25 +276,6 @@ function Get-ResolvedPackages {
         } | Sort-Object Id, Version)
 }
 
-function Invoke-SmokeStep {
-    param(
-        [Parameter(Mandatory = $true)][string]$Label,
-        [Parameter(Mandatory = $true)][string]$ToolCommand,
-        [Parameter(Mandatory = $true)][string[]]$Arguments
-    )
-
-    $global:LASTEXITCODE = 0
-    $output = (& $ToolCommand @Arguments 2>&1 | Out-String).TrimEnd()
-    $exitCode = $LASTEXITCODE
-    Write-Host "--- $Label ---"
-    Write-Host ("Input: logschema {0}" -f ($Arguments -join ' '))
-    Write-Host "Exit code: $exitCode"
-    if ($output.Length -gt 0) {
-        Write-Host $output
-    }
-    return [pscustomobject]@{ Label = $Label; ExitCode = $exitCode; Output = $output }
-}
-
 $env:DOTNET_CLI_TELEMETRY_OPTOUT = '1'
 $env:KEELMATRIX_NO_TELEMETRY = '1'
 
@@ -318,6 +299,7 @@ Invoke-Timed 'Vulnerability audit regression tests' { & pwsh -NoProfile -NonInte
 Invoke-Timed 'Release contract regression tests' { & pwsh -NoProfile -NonInteractive -File (Join-Path $repositoryRoot 'build/Test-ReleaseVersion.Tests.ps1') }
 Invoke-Timed 'Release workflow contract' { & pwsh -NoProfile -NonInteractive -File (Join-Path $repositoryRoot 'build/Test-ReleaseWorkflow.ps1') }
 Invoke-Timed 'Pack-safety regression tests' { & pwsh -NoProfile -NonInteractive -File (Join-Path $repositoryRoot 'build/Test-PackSafety.ps1') }
+Invoke-Timed 'Documentation and repository consistency' { & pwsh -NoProfile -NonInteractive -File (Join-Path $repositoryRoot 'build/Test-Documentation.ps1') }
 Invoke-Timed 'Line-ending contract' {
     $trackedFiles = @(git -C $repositoryRoot ls-files)
     Assert-That ($LASTEXITCODE -eq 0) 'git must enumerate tracked files for the line-ending check'
@@ -342,6 +324,7 @@ Invoke-Timed 'Format and analyzer validation' { dotnet format $solution --no-res
 Invoke-Timed 'Release build' { dotnet build $solution -c Release --no-restore @msbuildVersionArgument --nologo }
 Invoke-Timed 'Unit and contract tests' { dotnet test (Join-Path $repositoryRoot 'tests/KeelMatrix.LogSchema.Tests/KeelMatrix.LogSchema.Tests.csproj') -c Release --no-build --no-restore --nologo }
 Invoke-Timed 'Phase 0 regression matrix' { & pwsh -NoProfile -NonInteractive -File (Join-Path $repositoryRoot 'build/Test-Phase0Matrix.ps1') }
+Invoke-Timed 'Shipping semantic fixture matrix' { & pwsh -NoProfile -NonInteractive -File (Join-Path $repositoryRoot 'build/Test-ShippingMatrix.ps1') -RepositoryRoot $repositoryRoot }
 
 $tool = Join-Path $repositoryRoot 'src/KeelMatrix.LogSchema/bin/Release/net8.0/KeelMatrix.LogSchema.dll'
 $fixtureProject = Join-Path $repositoryRoot 'fixtures/Phase0.Net8/Phase0.Net8.csproj'
@@ -591,123 +574,14 @@ Invoke-Timed 'Attached/detached package reproducibility' {
     Assert-That ($LASTEXITCODE -eq 0) 'attached/detached package reproducibility regression must pass'
 }
 
-Invoke-Timed 'Isolated consumer restore and tool install' {
-    $feed = Join-Path $smokeRoot 'feed'
-    $consumerRoot = Join-Path $smokeRoot 'consumer'
-    $toolPath = Join-Path $smokeRoot 'tool'
-    $cachePath = Join-Path $smokeRoot 'nuget-packages'
-    $httpCachePath = Join-Path $smokeRoot 'nuget-http-cache'
-    foreach ($path in @($feed, $consumerRoot, $toolPath, $cachePath, $httpCachePath)) {
-        New-Item -ItemType Directory -Force -Path $path | Out-Null
-    }
-    Copy-Item -LiteralPath (Join-Path $packageOutput $expectedPackageName) -Destination $feed
-    Copy-Item -Path (Join-Path $consumerFixture '*') -Destination $consumerRoot -Recurse
-
-    $escapedFeed = [System.Security.SecurityElement]::Escape($feed)
-    $config = Join-Path $smokeRoot 'NuGet.config'
-    @"
-<?xml version="1.0" encoding="utf-8"?>
-<configuration>
-  <packageSources>
-    <clear />
-    <add key="local" value="$escapedFeed" />
-    <add key="nuget.org" value="https://api.nuget.org/v3/index.json" protocolVersion="3" />
-  </packageSources>
-  <packageSourceMapping>
-    <packageSource key="local">
-      <package pattern="$packageId" />
-    </packageSource>
-    <packageSource key="nuget.org">
-      <package pattern="*" />
-    </packageSource>
-  </packageSourceMapping>
-</configuration>
-"@ | Set-Content -LiteralPath $config -Encoding utf8
-
-    $oldPackages = $env:NUGET_PACKAGES
-    $oldHttpCache = $env:NUGET_HTTP_CACHE_PATH
-    try {
-        $env:NUGET_PACKAGES = $cachePath
-        $env:NUGET_HTTP_CACHE_PATH = $httpCachePath
-        $consumerProject = Join-Path $consumerRoot 'PackageConsumerFixture.csproj'
-        dotnet restore $consumerProject --configfile $config --no-cache --nologo
-        Assert-That ($LASTEXITCODE -eq 0) 'consumer fixture restore must succeed from controlled sources'
-        dotnet tool install $packageId --version $packageVersion --tool-path $toolPath --configfile $config --no-cache --ignore-failed-sources
-        Assert-That ($LASTEXITCODE -eq 0) 'packed tool installation must succeed from the isolated local feed'
-    }
-    finally {
-        $env:NUGET_PACKAGES = $oldPackages
-        $env:NUGET_HTTP_CACHE_PATH = $oldHttpCache
-    }
-}
-
-Invoke-Timed 'Isolated packed-tool consumer smoke' {
-    $consumerRoot = Join-Path $smokeRoot 'consumer'
-    $toolPath = Join-Path $smokeRoot 'tool'
-    $consumerProject = Join-Path $consumerRoot 'PackageConsumerFixture.csproj'
-    $baseline = Join-Path $smokeRoot 'consumer-manifest.json'
-    $toolCommandPath = Join-Path $toolPath ($(if ($IsWindows) { 'logschema.exe' } else { 'logschema' }))
-    Assert-That (Test-Path -LiteralPath $toolCommandPath) "installed logschema command not found at $toolCommandPath"
-
-    $oldLocation = Get-Location
-    try {
-        Set-Location $smokeRoot
-        $help = Invoke-SmokeStep -Label 'help' -ToolCommand $toolCommandPath -Arguments @('--help')
-        Assert-That ($help.ExitCode -eq 0) 'logschema --help must return exit 0'
-        Assert-That ($help.Output -match 'logschema capture' -and $help.Output -match 'Usage:') 'help must identify the logschema command'
-
-        $capture = Invoke-SmokeStep -Label 'capture' -ToolCommand $toolCommandPath -Arguments @('capture', $consumerProject, '--output', $baseline, '--no-telemetry')
-        Assert-That ($capture.ExitCode -eq 0 -and (Test-Path -LiteralPath $baseline)) 'consumer capture must return exit 0 and write a manifest'
-        $capturedManifest = Get-Content -Raw -LiteralPath $baseline | ConvertFrom-Json
-        $omittedEvent = @($capturedManifest.events | Where-Object { $_.method -eq 'OmittedEventId' })
-        Assert-That ($omittedEvent.Count -eq 1 -and $omittedEvent[0].eventId -ne 0 -and $omittedEvent[0].eventName -eq 'OmittedEventId' -and $omittedEvent[0].level -eq 'Information') 'installed capture must record generator-derived EventId, default EventName, and fixed level'
-        $dynamicEvent = @($capturedManifest.events | Where-Object { $_.method -eq 'DynamicLevel' })
-        Assert-That ($dynamicEvent.Count -eq 1 -and $dynamicEvent[0].level -eq 'Dynamic') 'installed capture must distinguish a dynamic LogLevel parameter from fixed None'
-        $fixedNoneEvent = @($capturedManifest.events | Where-Object { $_.method -eq 'FixedNone' })
-        Assert-That ($fixedNoneEvent.Count -eq 1 -and $fixedNoneEvent[0].level -eq 'None') 'installed capture must preserve explicit LogLevel.None'
-
-        $clean = Invoke-SmokeStep -Label 'clean check' -ToolCommand $toolCommandPath -Arguments @('check', $consumerProject, '--baseline', $baseline, '--no-telemetry')
-        Assert-That ($clean.ExitCode -eq 0) 'clean consumer check must return exit 0'
-        Assert-That ($clean.Output -match 'LogSchema: no gated incompatibilities found\.') 'clean check must report no gated incompatibilities'
-
-        $incompleteBaseline = Join-Path $smokeRoot 'consumer-incomplete.json'
-        $incompleteManifest = Get-Content -Raw -LiteralPath $baseline | ConvertFrom-Json
-        $incompleteManifest.unsupported = @([pscustomobject]@{
-                projectKey = [string]$incompleteManifest.projects[0].key
-                source = [pscustomobject]@{ file = 'ConsumerLogging.cs'; line = 1; kind = 'source' }
-                declaration = 'unsupported declaration'
-                declarationKey = 'PackageConsumerFixture.Unsupported'
-                reason = 'unsupported form'
-            })
-        $incompleteManifest | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $incompleteBaseline -Encoding utf8NoBOM
-        $unsupportedCheck = Invoke-SmokeStep -Label 'unsupported coverage check' -ToolCommand $toolCommandPath -Arguments @('check', $consumerProject, '--baseline', $incompleteBaseline, '--format', 'json', '--no-telemetry')
-        Assert-That ($unsupportedCheck.ExitCode -eq 3 -and $unsupportedCheck.Output -match 'KMLOGP007' -and $unsupportedCheck.Output -match 'PackageConsumerFixture\.Unsupported' -and $unsupportedCheck.Output -match 'unsupported form') 'installed check must gate and explain unsupported baseline coverage'
-        $unsupportedDiff = Invoke-SmokeStep -Label 'unsupported coverage diff' -ToolCommand $toolCommandPath -Arguments @('diff', $baseline, $incompleteBaseline, '--format', 'json', '--no-telemetry')
-        Assert-That ($unsupportedDiff.ExitCode -eq 3 -and $unsupportedDiff.Output -match 'KMLOGP007' -and $unsupportedDiff.Output -match 'PackageConsumerFixture\.Unsupported') 'installed diff must gate and explain unsupported coverage'
-
-        $sourcePath = Join-Path $consumerRoot 'ConsumerLogging.cs'
-        $source = Get-Content -Raw -LiteralPath $sourcePath
-        $source = $source.Replace('Processed {OrderId}', 'Processed {AccountId}').Replace('int orderId', 'int accountId')
-        Set-Content -LiteralPath $sourcePath -Value $source -Encoding utf8
-        $mutated = Invoke-SmokeStep -Label 'mutated structured field check' -ToolCommand $toolCommandPath -Arguments @('check', $consumerProject, '--baseline', $baseline, '--no-telemetry')
-        $expectedDiagnostic = 'BREAKING KMLOG102 ConsumerProcessed changed structured property "OrderId" to "AccountId".'
-        Assert-That ($mutated.ExitCode -eq 1) 'mutated consumer check must return exit 1'
-        Assert-That ($mutated.Output.Contains($expectedDiagnostic)) "mutated check must contain the exact diagnostic: $expectedDiagnostic"
-
-        $source = Get-Content -Raw -LiteralPath $sourcePath
-        $source = $source.Replace('Processed {AccountId}', 'Processed {OrderId}').Replace('int accountId', 'int orderId').Replace('[LoggerMessage(Message = "Dynamic level {Value}")]', '[LoggerMessage(Level = LogLevel.None, Message = "Dynamic level {Value}")]')
-        Set-Content -LiteralPath $sourcePath -Value $source -Encoding utf8
-        $levelMutation = Invoke-SmokeStep -Label 'dynamic-to-fixed level check' -ToolCommand $toolCommandPath -Arguments @('check', $consumerProject, '--baseline', $baseline, '--severity', 'warning', '--no-telemetry')
-        Assert-That ($levelMutation.ExitCode -eq 1 -and $levelMutation.Output -match 'WARNING\s+KMLOG201 DynamicLevel changed level Dynamic -> None\.') 'installed check must report a dynamic-to-fixed level transition'
-
-        $invalid = Invoke-SmokeStep -Label 'invalid configuration' -ToolCommand $toolCommandPath -Arguments @('check', $consumerProject, '--baseline', $baseline, '--severity', 'invalid', '--no-telemetry')
-        Assert-That ($invalid.ExitCode -eq 2) 'invalid severity configuration must return documented exit 2'
-        Assert-That ($invalid.Output -match '--severity must be breaking, warning, or all\.') 'invalid configuration must explain the accepted severity values'
-        $global:LASTEXITCODE = 0
-    }
-    finally {
-        Set-Location $oldLocation
-    }
+Invoke-Timed 'Isolated local-manifest onboarding and installed-tool smoke' {
+    & pwsh -NoProfile -NonInteractive -File (Join-Path $repositoryRoot 'build/Test-LocalToolSmoke.ps1') `
+        -PackagePath (Join-Path $packageOutput $expectedPackageName) `
+        -PackageId $packageId `
+        -PackageVersion $packageVersion `
+        -ConsumerFixture $consumerFixture `
+        -WorkRoot $smokeRoot
+    Assert-That ($LASTEXITCODE -eq 0) 'the local-manifest installed-tool smoke must pass'
 }
 
 Write-Host 'Validation passed.'

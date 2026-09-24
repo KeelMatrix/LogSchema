@@ -21,8 +21,15 @@ Structured identity fields use exact ordinal semantics: comparisons are case-sen
 
 ## Analysis diagnostics
 
-| Code | Condition | Result |
+Analysis diagnostics make an extracted or compared contract untrustworthy. An error returns exit code 3. Warnings remain in a captured manifest for review; comparison rejects any manifest with unsupported declarations through `KMLOGP007`.
+
+| Code | Condition | Severity and result |
 | --- | --- | --- |
+| KMLOGP001 | Multiple project-source `[LoggerMessage]` declarations share one stable method identity, so generated pairing is ambiguous. | Error; capture/check return exit 3 and no baseline is written. |
+| KMLOGP002 | A generated `[LoggerMessage]` declaration has no one-to-one project-source counterpart. | Warning in the captured analysis; the declaration is retained in `unsupported`. A later check/diff reports `KMLOGP007`. |
+| KMLOGP003 | Multiple loaded projects share one canonical `<assembly>|<target-framework>` project key. | Error; capture/check return exit 3 because event ownership is ambiguous. |
+| KMLOGP004 | MSBuild reports a workspace failure while loading the project graph. | Error; capture/check return exit 3 because project evaluation is incomplete. |
+| KMLOGP005 | The project compilation contains an error other than the expected design-time unimplemented-partial diagnostic. | Error; capture/check return exit 3 because the extracted contract is not trustworthy. |
 | KMLOGP006 | No supported `[LoggerMessage]` declarations were found. | `capture` and `check` return exit 3; `capture` writes no baseline and `check` rejects a zero-event baseline. |
 | KMLOGP007 | The manifest contains unsupported declarations. | `check` and `diff` return exit 3 and report the unsupported declaration identities and reasons; the supported subset is not presented as complete coverage. |
 

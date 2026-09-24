@@ -11,13 +11,29 @@ The recommended installation is a repository-pinned local tool manifest:
 ```bash
 dotnet new tool-manifest
 dotnet tool install KeelMatrix.LogSchema
-logschema capture MyService.csproj --output logschema.json
+dotnet tool run logschema capture MyService.csproj --output logschema.json
+dotnet tool run logschema check MyService.csproj --baseline logschema.json
 ```
 
-Commit the manifest and `logschema.json` after reviewing the contract. For just trying it, install globally immediately below the local-manifest path:
+Commit `dotnet-tools.json` and `logschema.json` after reviewing them. On a fresh checkout, restore the manifest-pinned version before running LogSchema:
+
+```bash
+dotnet tool restore
+dotnet tool run logschema check MyService.csproj --baseline logschema.json
+```
+
+### Prerequisites
+
+The tool requires the .NET 8 runtime. Project loading requires a full .NET SDK/MSBuild installation; v1 project-loading behavior is verified with .NET SDK `10.0.401`, the version pinned by `global.json`. Restore the target project with that SDK before capture or check. The verified fixtures target `net8.0` and `net10.0`; support is not claimed for project systems that the pinned SDK and design-time MSBuild workspace cannot evaluate.
+
+### Global tool alternative
+
+For a disposable trial, install the tool globally and use the bare command. This path is separate from the manifest-pinned workflow:
 
 ```bash
 dotnet tool install --global KeelMatrix.LogSchema
+logschema capture MyService.csproj --output logschema.json
+logschema check MyService.csproj --baseline logschema.json
 ```
 
 ## Quick start
@@ -25,13 +41,13 @@ dotnet tool install --global KeelMatrix.LogSchema
 After an intentional or accidental change:
 
 ```bash
-logschema check MyService.csproj --baseline logschema.json
+dotnet tool run logschema check MyService.csproj --baseline logschema.json
 ```
 
 Compare two manifests without loading a project:
 
 ```bash
-logschema diff old-logschema.json new-logschema.json
+dotnet tool run logschema diff old-logschema.json new-logschema.json
 ```
 
 ## What is a log contract?
@@ -67,12 +83,12 @@ Intentional changes can be accepted explicitly with repeated `--accept <diagnost
 
 `capture` writes the canonical `logschema.json` (or the path supplied by `--output`). `check` analyzes the current project and compares it with `--baseline`; it never rewrites that file. To update an intentional baseline, run `capture` explicitly, review the diff, and commit the result. `diff` compares two existing manifests offline.
 
-Common options are `--format text|json`, `--severity breaking|warning|all`, `--accept <code>`, `--no-telemetry`, and `--tfm <target-framework>`. The telemetry option is reserved and accepted for script portability; v1 emits no telemetry because the bounded company integration is intentionally omitted.
+Common options are `--format text|json`, `--severity breaking|warning|all`, `--accept <code>`, `--no-telemetry`, and `--tfm <target-framework>`. The telemetry option is reserved and accepted for script portability. V1 contains no telemetry client and makes no telemetry network requests.
 
 ## CI and exit codes
 
 ```bash
-logschema check MyService.csproj --baseline logschema.json --format json
+dotnet tool run logschema check MyService.csproj --baseline logschema.json --format json
 ```
 
 Exit codes are:
@@ -107,13 +123,13 @@ The stable diagnostic reference is in [COMPATIBILITY-RULES.md](COMPATIBILITY-RUL
 
 ## Cross-platform and SDK support
 
-The public CI workflow validates Windows, Linux, and macOS on the SDK pinned in `global.json`. [CI run 35874369927](https://github.com/KeelMatrix/LogSchema/actions/runs/35874369927) verified all three legs, including macOS. The tool targets `net8.0`, has no OS-specific path or shell behavior, and uses centrally pinned Roslyn/MSBuild dependencies. The repository development SDK is pinned to `10.0.401`, and the tool does not require a network connection after restore.
+The public CI workflow validates the built package, local-manifest installation, and installed `capture`, `check`, and `diff` commands on Windows, Linux, and macOS with SDK `10.0.401`. The tool targets `net8.0`, has no OS-specific command syntax, and uses centrally pinned Roslyn/MSBuild dependencies. After the tool and target project's dependencies are restored, LogSchema analysis does not require a network connection.
 
 ## Privacy and security
 
-No source, manifest, path, project identity, or schema content is uploaded. V1 has no telemetry. LogSchema does not execute target application code and does not read runtime values. Roslyn/MSBuild project evaluation still has the normal trust boundary of the local machine; do not run it on untrusted projects without appropriate isolation. Manifest input is treated as untrusted and is bounded and fail-closed.
+No source, manifest, path, project identity, or schema content is uploaded. V1 has no telemetry client. LogSchema does not execute target application code and does not read runtime values. Roslyn/MSBuild project evaluation still has the normal trust boundary of the local machine; do not run it on untrusted projects without appropriate isolation. Manifest input is treated as untrusted and is bounded and fail-closed.
 
-See the [security policy](SECURITY.md) and [dependency rationale](docs/DEPENDENCIES.md) for the repository's security and supply-chain details.
+See the [privacy statement](PRIVACY.md), [security policy](SECURITY.md), and [dependency rationale](docs/DEPENDENCIES.md) for the repository's data and supply-chain boundaries.
 
 ## Troubleshooting
 
@@ -134,7 +150,7 @@ dotnet test tests/KeelMatrix.LogSchema.Tests/KeelMatrix.LogSchema.Tests.csproj -
 pwsh ./build/validate.ps1
 ```
 
-The Phase 0 semantic probe and fixtures remain in `phase0/` and `fixtures/` as regression evidence. The shipping tool is in `src/KeelMatrix.LogSchema/`; its project-local README is the README input for the package step.
+The Phase 0 semantic probe remains in `phase0/`. The same committed semantic fixtures are exercised separately against the shipping extractor by `build/Test-ShippingMatrix.ps1`; see [semantic fixture validation](docs/PHASE0-FEASIBILITY.md). The shipping tool is in `src/KeelMatrix.LogSchema/`, and its project-local README is packed at the NuGet package root.
 
 Repository text sources use canonical LF line endings so a normal Windows clone with `core.autocrlf=true` remains format-clean. `dotnet pack` uses a fixed deterministic ZIP timestamp and emits portable PDBs with canonical GitHub SourceLink mappings for the exact repository commit. `build/validate.ps1` inspects both package archives, their portable PDBs, and their SourceLink records, rejects private machine paths and unexpected content, and requires artifact bytes to remain identical across attached, detached, and alternate-directory checkouts that use the canonical repository URL.
 

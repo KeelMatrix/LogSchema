@@ -1,17 +1,17 @@
 # Dependency rationale
 
-This document explains the dependency boundary for the v1 `KeelMatrix.LogSchema` tool. The Release package gate reports the exact generated nuspec dependencies and the complete restored Core graph; the commands below reproduce that evidence.
+This document explains the dependency boundary for the v1 `KeelMatrix.LogSchema` tool. The NuGet tool package bundles the shipping CLI, Core assembly, and required runtime files under `tools/net8.0/any`; its generated nuspec intentionally exposes no external package dependencies. The Release package gate checks that archive shape and separately reports the complete restored Core graph; the commands below reproduce the graph evidence.
 
 The shipping tool has one runtime dependency graph for semantic project loading and canonical comparison:
 
 - `Microsoft.CodeAnalysis.CSharp.Workspaces` and `Microsoft.CodeAnalysis.Workspaces.MSBuild` provide semantic C# documents and design-time SDK project loading. They are required to discover `LoggerMessageAttribute` declarations without executing target assemblies.
 - `Microsoft.Build.Locator` selects the installed MSBuild instance used by the workspace. It is a project-loading dependency, not a runtime logging provider.
-- `Microsoft.Build.Framework`, `Microsoft.Build`, `Microsoft.Build.Utilities.Core`, `Microsoft.Build.Tasks.Core`, and `Microsoft.NET.StringTools` are private build/runtime support assets required by the MSBuild workspace and are excluded from consumer compile/runtime asset flow where the locator requires it.
+- `Microsoft.Build.Framework`, `Microsoft.Build`, `Microsoft.Build.Utilities.Core`, `Microsoft.Build.Tasks.Core`, and `Microsoft.NET.StringTools` are private build support references used to compile against MSBuild. Their runtime assets are excluded so project loading uses the SDK selected by `Microsoft.Build.Locator` rather than a second bundled MSBuild engine.
 - `Microsoft.Extensions.Logging.Abstractions` supplies the current logging attribute and symbol definitions used by representative projects; LogSchema does not depend on a logging provider or backend.
 - `System.Formats.Asn1` is pinned at `9.0.1` in the Core restore graph as a deliberate security-floor dependency and is checked by the package validation gate.
 - `System.Text.Json` is supplied by the net8.0 framework and is used for the bounded schema-v1 serializer/parser.
 
-The CLI parser is framework code so the public tool does not add a large parser dependency. `Microsoft.NET.Test.Sdk`, `xunit`, and `xunit.runner.visualstudio` are test-only dependencies. No telemetry client, network service, provider SDK, or hosted backend is included.
+The CLI parser is framework code so the public tool does not add a large parser dependency. `Microsoft.NET.Test.Sdk`, `xunit`, and `xunit.runner.visualstudio` are test-only dependencies. No telemetry client, network service, provider SDK, or hosted backend is included. The .NET 8 runtime is required to execute the tool; project loading is verified against SDK/MSBuild `10.0.401`.
 
 Versions are centrally pinned in `Directory.Packages.props`. The Phase 0 probe keeps its validated Roslyn 5.9 override; the shipping net8.0 path uses the net8-compatible Roslyn 4.14 line.
 

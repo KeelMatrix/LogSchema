@@ -6,7 +6,7 @@ Report suspected vulnerabilities privately by emailing `keelmatrix@gmail.com` wi
 
 ## Supported versions
 
-The current supported release line is v1. Older versions may receive a security response when a fix can be safely backported, but users should upgrade to the current release before reporting a suspected issue.
+The intended first supported release line is `0.1.x`, beginning with `0.1.0`. Before the first public package is published, security reports should identify the affected commit. After publication, users should reproduce on the latest available `0.1.x` version before reporting when practical.
 
 ## Security boundaries
 
