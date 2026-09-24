@@ -115,7 +115,7 @@ A project-load failure is always code 3 and cannot produce a clean result. JSON 
 
 ## Manifest and determinism
 
-Manifest schema version 1 is documented in [MANIFEST.md](MANIFEST.md). It is UTF-8 without a BOM, uses invariant canonical values, sorts every list with ordinal ordering, normalizes paths to project-relative `/` separators, and contains no absolute machine paths. Parsing is bounded to 4 MiB and depth 32 and rejects malformed input or a future schema version.
+Manifest schema version 1 is documented in [MANIFEST.md](MANIFEST.md). It is UTF-8 without a BOM, uses invariant canonical values, sorts every list with ordinal ordering, normalizes paths to project-relative `/` separators, and contains no absolute machine paths. Parsing is bounded to 4 MiB and depth 32 and rejects malformed input, a future schema version, and event identities that contradict their containing type, method, generic arity, parameter count, ref kinds, or parameter forms.
 
 ## Diagnostics
 
@@ -136,7 +136,7 @@ See the [privacy statement](PRIVACY.md), [security policy](SECURITY.md), and [de
 - **Project-load failure:** confirm the SDK is installed, restore the project with its normal package sources, and pass the intended target framework with `--tfm` for a multi-targeted project. The command returns 3 on failure.
 - **Zero events (`KMLOGP006`):** `capture` and `check` return 3 when no supported `[LoggerMessage]` declarations are discovered, and `capture` writes no baseline. Check that the project genuinely contains declarations, that their shape is supported, and that the intended target framework is selected with `--tfm`. Manual `ILogger.Log*` calls are outside v1. A zero-event baseline is also rejected by `check`; `diff` is unaffected.
 - **Unsupported declaration:** inspect the manifest `unsupported` list and its reason. The declaration was reported rather than discarded.
-- **Invalid manifest:** regenerate it with `capture`. Malformed JSON, absolute source paths, oversized/deep input, and future schema versions are rejected with code 3.
+- **Invalid manifest:** regenerate it with `capture`. Malformed JSON, contradictory or non-canonical event identities, unknown parameter vocabularies, absolute source paths, oversized/deep input, and future schema versions are rejected with code 3.
 - **Duplicate or ambiguous identity:** correct duplicate partial declarations or project identities. The manifest records an analysis error and comparison cannot report clean.
 
 Microsoft's generator diagnostics validate declaration correctness at compile time. LogSchema adds a persisted, deterministic history comparison. It is also distinct from logging governance/style analyzers and from secret/redaction tooling: it checks compatibility of declared event shapes only.

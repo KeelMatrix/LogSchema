@@ -64,6 +64,28 @@ function Invoke-LocalTool {
     return [pscustomobject]@{ Label = $Label; ExitCode = $exitCode; Output = $output }
 }
 
+function Assert-AnalysisErrorEnvelope {
+    param(
+        [Parameter(Mandatory = $true)]$Result,
+        [Parameter(Mandatory = $true)][string]$Label,
+        [Parameter(Mandatory = $true)][string]$ForbiddenPath
+    )
+
+    Assert-That ($Result.ExitCode -eq 3) "$Label must return exit code 3"
+    try {
+        $envelope = $Result.Output | ConvertFrom-Json
+    }
+    catch {
+        throw "Assertion failed: $Label must return a JSON envelope"
+    }
+    Assert-That (@($envelope.toolErrors).Count -eq 0) "$Label must not report an invocation error"
+    Assert-That (@($envelope.analysisErrors).Count -gt 0) "$Label must report an analysis error"
+    Assert-That (@($envelope.findings).Count -eq 0) "$Label must not report compatibility findings"
+    Assert-That ($envelope.coverageComplete -eq $false) "$Label must report incomplete coverage"
+    Assert-That (-not $Result.Output.Contains($ForbiddenPath, [StringComparison]::OrdinalIgnoreCase)) "$Label must not expose an absolute path"
+    Assert-That ($Result.Output -notmatch '(?m)^\s*at KeelMatrix\.') "$Label must not expose a stack trace"
+}
+
 $escapedFeed = [System.Security.SecurityElement]::Escape($feed)
 $config = Join-Path $WorkRoot 'NuGet.config'
 @"
@@ -128,7 +150,7 @@ try {
     New-Item -ItemType Directory -Force -Path (Split-Path -Parent $freshManifestPath) | Out-Null
     Copy-Item -LiteralPath $manifestPath -Destination $freshManifestPath
     Copy-Item -LiteralPath (Join-Path $ConsumerFixture 'PackageConsumerFixture.csproj') -Destination $freshCheckout
-    Copy-Item -LiteralPath (Join-Path $ConsumerFixture 'ConsumerLogging.cs') -Destination $freshCheckout
+    Get-ChildItem -LiteralPath $ConsumerFixture -Filter '*.cs' -File | Copy-Item -Destination $freshCheckout
 
     Assert-That (@(Get-ChildItem -LiteralPath $freshPackages -Force).Count -eq 0) 'the fresh-checkout package cache must start empty'
     Assert-That (@(Get-ChildItem -LiteralPath $freshHttpCache -Force).Count -eq 0) 'the fresh-checkout HTTP cache must start empty'
@@ -170,6 +192,64 @@ try {
 
     $cleanDiff = Invoke-LocalTool -Label 'local-manifest clean diff' -Arguments @('diff', $baseline, $baseline, '--no-telemetry')
     Assert-That ($cleanDiff.ExitCode -eq 0 -and $cleanDiff.Output -match 'LogSchema: no gated incompatibilities found\.') 'manifest-pinned clean diff must return exit 0'
+
+    function Write-IdentityMutation {
+        param(
+            [Parameter(Mandatory = $true)][string]$Mutation,
+            [Parameter(Mandatory = $true)][string]$Destination
+        )
+
+        $tamperedManifest = Get-Content -Raw -LiteralPath $baseline | ConvertFrom-Json
+        $identity = 'Logging.Event`0(None:Microsoft.Extensions.Logging.ILogger,None:string,None:string,None:string)'
+        $targetEvents = @($tamperedManifest.events | Where-Object identity -eq $identity)
+        Assert-That ($targetEvents.Count -eq 1) 'the installed capture must contain the canonical reviewer identity'
+        $targetEvent = $targetEvents[0]
+        switch ($Mutation) {
+            'reviewer-exact' {
+                $targetEvent.containingType = 'Totally.Wrong.Type'
+                $targetEvent.method = 'WrongMethod'
+                $targetEvent.genericArity = 99
+                $targetEvent.parameterRefKinds = @('UnknownRefKind')
+                $targetEvent.parameterForms = @('UnknownParameterForm')
+            }
+            'wrong-containing-type' { $targetEvent.containingType = 'Totally.Wrong.Type' }
+            'wrong-method' { $targetEvent.method = 'WrongMethod' }
+            'wrong-generic-arity' { $targetEvent.genericArity = 99 }
+            'wrong-parameter-count' { $targetEvent.parameterRefKinds = @('None') }
+            'wrong-ref-kind' { $targetEvent.parameterRefKinds = @('None', 'Ref', 'None', 'None') }
+            'unknown-ref-kind' { $targetEvent.parameterRefKinds = @('None', 'UnknownRefKind', 'None', 'None') }
+            'wrong-parameter-form' { $targetEvent.parameterForms = @('Exception') }
+            'unknown-parameter-form' { $targetEvent.parameterForms = @('UnknownParameterForm') }
+            default { throw "Unknown identity mutation: $Mutation" }
+        }
+        $tamperedManifest | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $Destination -Encoding utf8NoBOM
+    }
+
+    $identityMutations = @(
+        'reviewer-exact',
+        'wrong-containing-type',
+        'wrong-method',
+        'wrong-generic-arity',
+        'wrong-parameter-count',
+        'wrong-ref-kind',
+        'unknown-ref-kind',
+        'wrong-parameter-form',
+        'unknown-parameter-form'
+    )
+    foreach ($mutation in $identityMutations) {
+        $tamperedBaseline = Join-Path $freshCheckout "tampered-$mutation.json"
+        Write-IdentityMutation -Mutation $mutation -Destination $tamperedBaseline
+        $tamperedCheck = Invoke-LocalTool -Label "local-manifest $mutation check" -Arguments @('check', $consumerProject, '--baseline', $tamperedBaseline, '--format', 'json', '--severity', 'all', '--no-telemetry')
+        Assert-AnalysisErrorEnvelope -Result $tamperedCheck -Label "installed $mutation check" -ForbiddenPath $freshCheckout
+        $tamperedDiff = Invoke-LocalTool -Label "local-manifest $mutation diff" -Arguments @('diff', $baseline, $tamperedBaseline, '--format', 'json', '--severity', 'all', '--no-telemetry')
+        Assert-AnalysisErrorEnvelope -Result $tamperedDiff -Label "installed $mutation diff" -ForbiddenPath $freshCheckout
+    }
+
+    $reviewerBaseline = Join-Path $freshCheckout 'tampered-reviewer-exact.json'
+    $reviewerText = Invoke-LocalTool -Label 'local-manifest reviewer-exact text check' -Arguments @('check', $consumerProject, '--baseline', $reviewerBaseline, '--severity', 'all', '--no-telemetry')
+    Assert-That ($reviewerText.ExitCode -eq 3 -and $reviewerText.Output -match '(?m)^ANALYSIS ERROR ') 'the reviewer-exact text check must return an analysis error and exit 3'
+    Assert-That (-not $reviewerText.Output.Contains($freshCheckout, [StringComparison]::OrdinalIgnoreCase)) 'the reviewer-exact text check must not expose an absolute path'
+    Assert-That ($reviewerText.Output -notmatch '(?m)^\s*at KeelMatrix\.') 'the reviewer-exact text check must not expose a stack trace'
 
     $incompleteBaseline = Join-Path $freshCheckout 'incomplete.json'
     $incompleteManifest = Get-Content -Raw -LiteralPath $baseline | ConvertFrom-Json

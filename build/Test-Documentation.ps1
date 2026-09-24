@@ -42,11 +42,13 @@ foreach ($number in 1..7) {
     $code = 'KMLOGP{0:D3}' -f $number
     Assert-That ($diagnostics -match [regex]::Escape($code)) "the diagnostic reference must document $code"
 }
+Assert-That ($diagnostics -match 'contradictions between a parsed identity' -and $diagnostics -match 'analysisErrors') 'the diagnostic reference must document canonical identity validation failure behavior'
 
 $privacy = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot 'PRIVACY.md')
 Assert-That ($privacy -match 'contains no telemetry client' -and $privacy -match 'makes no network requests') 'privacy claims must match the shipping implementation'
 $manifest = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot 'MANIFEST.md')
 Assert-That ($manifest -match 'contains no telemetry client' -and $manifest -match '10\.0\.401') 'manifest privacy and SDK claims must match the shipping implementation'
+Assert-That ($manifest -match 'parameterRefKinds.*same count and values' -and $manifest -match 'unknown ref-kind or parameter-form values') 'the manifest contract must document canonical identity tuple validation'
 $dependencies = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot 'docs/DEPENDENCIES.md')
 Assert-That ($dependencies -match 'nuspec intentionally exposes no external package dependencies' -and $dependencies -match '10\.0\.401') 'dependency documentation must describe the bundled shipping graph and verified SDK'
 

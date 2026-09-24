@@ -10,6 +10,6 @@ The intended first supported release line is `0.1.x`, beginning with `0.1.0`. Be
 
 ## Security boundaries
 
-The tool does not execute target application code, upload source or manifests, or emit telemetry in v1. Project loading still evaluates local MSBuild input; use an appropriate isolation boundary for untrusted projects.
+The tool does not execute target application code, upload source or manifests, or emit telemetry in v1. Manifest input is size- and depth-bounded and is rejected before comparison when its canonical event-identity tuple is malformed or contradictory. Project loading still evaluates local MSBuild input; use an appropriate isolation boundary for untrusted projects.
 
 The repository gate parses direct-and-transitive NuGet vulnerability reports and fails on findings, command failures, or unusable audit data. Pack-time targets reject environment, telemetry, credential, key, and internal-development files even when they are explicitly marked for packing, and final archive validation rejects any content outside the expected tool and symbol-package layouts.

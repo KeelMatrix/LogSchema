@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json.Nodes;
 using KeelMatrix.LogSchema;
 
 namespace KeelMatrix.LogSchema.Tests;
@@ -8,7 +9,7 @@ public sealed class ManifestJsonTests
     [Fact]
     public async Task SerializationIsCanonicalUtf8AndPathIndependent()
     {
-        var manifest = new ManifestDocument(1, [new ProjectIdentity("P|net8.0", "P", "P", "net8.0")], [new EventContract("P|net8.0", "P.Logging.Event`0(Microsoft.Extensions.Logging.ILogger)", "P.Logging", "Event", 0, ["None"], 10, "Event", "Information", "Событие {Идентификатор}", [new Placeholder("Идентификатор", "Идентификатор")], ["ILogger"], new SourceLocation("src/Logging.cs", 4, "source"))], [], [], [], []);
+        var manifest = new ManifestDocument(1, [new ProjectIdentity("P|net8.0", "P", "P", "net8.0")], [new EventContract("P|net8.0", "P.Logging.Event`0(None:Microsoft.Extensions.Logging.ILogger)", "P.Logging", "Event", 0, ["None"], 10, "Event", "Information", "Событие {Идентификатор}", [new Placeholder("Идентификатор", "Идентификатор")], ["ILogger"], new SourceLocation("src/Logging.cs", 4, "source"))], [], [], [], []);
         var root = Path.Combine(Path.GetTempPath(), "logschema-tests-" + Guid.NewGuid().ToString("N"));
         var first = Path.Combine(root, "one", "logschema.json");
         var second = Path.Combine(root, "two", "logschema.json");
@@ -115,7 +116,7 @@ public sealed class ManifestJsonTests
                 "Information",
                 $"Processed {{Value{index}}}",
                 [new Placeholder($"Value{index}", $"Value{index}")],
-                ["ILogger", "ordinary"],
+                ["ILogger"],
                 new SourceLocation($"Logging/Event{index}.cs", index + 1, "source")))
             .ToArray();
         var manifest = new ManifestDocument(
@@ -205,6 +206,122 @@ public sealed class ManifestJsonTests
     }
 
     [Fact]
+    public async Task ContradictoryCanonicalIdentityTupleFailsClosed()
+    {
+        var root = Directory.CreateTempSubdirectory("logschema-identity-");
+        var path = Path.Combine(root.FullName, "contradictory.json");
+        await File.WriteAllTextAsync(path, """
+        {
+          "schemaVersion": 1,
+          "projects": [{ "key": "MyService|net8.0", "name": "MyService", "assembly": "MyService", "targetFramework": "net8.0" }],
+          "events": [{
+            "projectKey": "MyService|net8.0",
+            "identity": "Logging.Event`0(None:Microsoft.Extensions.Logging.ILogger,None:string,None:string,None:string)",
+            "containingType": "Totally.Wrong.Type",
+            "method": "WrongMethod",
+            "genericArity": 99,
+            "parameterRefKinds": ["UnknownRefKind"],
+            "eventId": 1,
+            "eventName": "Event",
+            "level": "Information",
+            "message": "Event {One} {Two} {Three}",
+            "placeholders": [
+              { "name": "One", "token": "One" },
+              { "name": "Two", "token": "Two" },
+              { "name": "Three", "token": "Three" }
+            ],
+            "parameterForms": ["UnknownParameterForm"],
+            "source": { "file": "Logging.cs", "line": 1, "kind": "source" }
+          }],
+          "unsupported": [],
+          "analysisIssues": [],
+          "compilationDiagnosticKinds": [],
+          "workspaceDiagnosticKinds": []
+        }
+        """);
+
+        try
+        {
+            await Assert.ThrowsAsync<ManifestReadException>(() => ManifestJson.ReadAsync(path, CancellationToken.None));
+        }
+        finally
+        {
+            root.Delete(true);
+        }
+    }
+
+    [Theory]
+    [InlineData("containingType")]
+    [InlineData("method")]
+    [InlineData("genericArity")]
+    [InlineData("parameterCount")]
+    [InlineData("refKindMismatch")]
+    [InlineData("unknownRefKind")]
+    [InlineData("parameterFormMismatch")]
+    [InlineData("unknownParameterForm")]
+    [InlineData("malformedIdentity")]
+    [InlineData("invalidTypeSyntax")]
+    public async Task EachNonCanonicalIdentityDimensionFailsClosed(string mutation)
+    {
+        var root = Directory.CreateTempSubdirectory("logschema-identity-dimension-");
+        var path = Path.Combine(root.FullName, mutation + ".json");
+        var manifest = JsonNode.Parse("""
+        {
+          "schemaVersion": 1,
+          "projects": [{ "key": "MyService|net8.0", "name": "MyService", "assembly": "MyService", "targetFramework": "net8.0" }],
+          "events": [{
+            "projectKey": "MyService|net8.0",
+            "identity": "Logging.Event`0(None:Microsoft.Extensions.Logging.ILogger,None:string,None:string,None:string)",
+            "containingType": "Logging",
+            "method": "Event",
+            "genericArity": 0,
+            "parameterRefKinds": ["None", "None", "None", "None"],
+            "eventId": 1,
+            "eventName": "Event",
+            "level": "Information",
+            "message": "Event {One} {Two} {Three}",
+            "placeholders": [
+              { "name": "One", "token": "One" },
+              { "name": "Two", "token": "Two" },
+              { "name": "Three", "token": "Three" }
+            ],
+            "parameterForms": ["ILogger"],
+            "source": { "file": "Logging.cs", "line": 1, "kind": "source" }
+          }],
+          "unsupported": [],
+          "analysisIssues": [],
+          "compilationDiagnosticKinds": [],
+          "workspaceDiagnosticKinds": []
+        }
+        """)!;
+        var eventNode = manifest["events"]![0]!.AsObject();
+        switch (mutation)
+        {
+            case "containingType": eventNode["containingType"] = "Wrong.Type"; break;
+            case "method": eventNode["method"] = "WrongMethod"; break;
+            case "genericArity": eventNode["genericArity"] = 1; break;
+            case "parameterCount": eventNode["parameterRefKinds"] = JsonNode.Parse("""["None"]"""); break;
+            case "refKindMismatch": eventNode["parameterRefKinds"] = JsonNode.Parse("""["None","Ref","None","None"]"""); break;
+            case "unknownRefKind": eventNode["parameterRefKinds"] = JsonNode.Parse("""["None","UnknownRefKind","None","None"]"""); break;
+            case "parameterFormMismatch": eventNode["parameterForms"] = JsonNode.Parse("""["Exception"]"""); break;
+            case "unknownParameterForm": eventNode["parameterForms"] = JsonNode.Parse("""["UnknownParameterForm"]"""); break;
+            case "malformedIdentity": eventNode["identity"] = "Logging.Event`0(None:Microsoft.Extensions.Logging.ILogger"; break;
+            case "invalidTypeSyntax": eventNode["identity"] = "Logging.Event`0(None:Microsoft.Extensions.Logging.ILogger,None:string,None:string,None:???)"; break;
+            default: throw new InvalidOperationException("Unknown test mutation.");
+        }
+        await File.WriteAllTextAsync(path, manifest.ToJsonString());
+
+        try
+        {
+            await Assert.ThrowsAsync<ManifestReadException>(() => ManifestJson.ReadAsync(path, CancellationToken.None));
+        }
+        finally
+        {
+            root.Delete(true);
+        }
+    }
+
+    [Fact]
     public async Task FailedOversizedWriteDoesNotReplaceExistingManifest()
     {
         var root = Directory.CreateTempSubdirectory("logschema-write-");
@@ -214,7 +331,7 @@ public sealed class ManifestJsonTests
         var manifest = new ManifestDocument(
             1,
             [new ProjectIdentity("P|net8.0", "P", "P", "net8.0")],
-            [new EventContract("P|net8.0", "P.Event", "P", "Event", 0, ["None"], 1, "Event", "Information", huge, [], ["ILogger"], new SourceLocation("Logging.cs", 1, "source"))],
+            [new EventContract("P|net8.0", "P.Event`0(None:Microsoft.Extensions.Logging.ILogger)", "P", "Event", 0, ["None"], 1, "Event", "Information", huge, [], ["ILogger"], new SourceLocation("Logging.cs", 1, "source"))],
             [], [], [], []);
         try
         {

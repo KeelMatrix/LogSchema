@@ -15,6 +15,7 @@ public sealed class CommandRunnerTests
         Assert.Contains("logschema capture", output.ToString(), StringComparison.Ordinal);
         Assert.Contains("--no-telemetry", output.ToString(), StringComparison.Ordinal);
         Assert.Contains("contains no telemetry client", output.ToString(), StringComparison.Ordinal);
+        Assert.Contains("contradictory manifest identity tuples fail analysis with exit 3", output.ToString(), StringComparison.OrdinalIgnoreCase);
         Assert.Empty(errors.ToString());
     }
 

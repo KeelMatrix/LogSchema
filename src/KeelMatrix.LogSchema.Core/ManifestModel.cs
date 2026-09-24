@@ -2,6 +2,7 @@ using System.Security;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Microsoft.CodeAnalysis.CSharp;
 
 namespace KeelMatrix.LogSchema;
 
@@ -92,6 +93,23 @@ internal static class ManifestJson
 {
     internal const int MaxBytes = 4 * 1024 * 1024;
     internal const int MaxItems = 100_000;
+
+    private static readonly HashSet<string> ParameterRefKinds = new(StringComparer.Ordinal)
+    {
+        "None",
+        "Ref",
+        "Out",
+        "In",
+        "RefReadOnly",
+        "RefReadOnlyParameter"
+    };
+
+    private static readonly HashSet<string> ParameterForms = new(StringComparer.Ordinal)
+    {
+        "Exception",
+        "ILogger",
+        "LogLevel"
+    };
 
     private static readonly JsonSerializerOptions Options = new()
     {
@@ -439,9 +457,31 @@ internal static class ManifestJson
                 throw new ManifestValidationException("A manifest event is incomplete, non-canonical, or unrelated to a manifest project.");
             }
 
-            if (@event.ParameterRefKinds.Any(kind => string.IsNullOrWhiteSpace(kind)) || @event.ParameterForms.Any(form => string.IsNullOrWhiteSpace(form)))
+            var parsedIdentity = ParseMethodIdentity(@event.Identity);
+            if (!string.Equals(parsedIdentity.ContainingType, @event.ContainingType, StringComparison.Ordinal) ||
+                !string.Equals(parsedIdentity.Method, @event.Method, StringComparison.Ordinal) ||
+                parsedIdentity.GenericArity != @event.GenericArity ||
+                parsedIdentity.Parameters.Count != @event.ParameterRefKinds.Count ||
+                !parsedIdentity.Parameters.Select(parameter => parameter.RefKind).SequenceEqual(@event.ParameterRefKinds, StringComparer.Ordinal))
+            {
+                throw new ManifestValidationException("A manifest event identity contradicts its canonical event fields.");
+            }
+
+            if (@event.ParameterRefKinds.Any(kind => !ParameterRefKinds.Contains(kind)) ||
+                @event.ParameterForms.Any(form => !ParameterForms.Contains(form)) ||
+                @event.ParameterForms.Distinct(StringComparer.Ordinal).Count() != @event.ParameterForms.Count ||
+                !@event.ParameterForms.SequenceEqual(@event.ParameterForms.Order(StringComparer.Ordinal), StringComparer.Ordinal))
             {
                 throw new ManifestValidationException("A manifest event contains an invalid parameter form.");
+            }
+
+            var hasLoggerParameter = parsedIdentity.Parameters.Any(parameter => IsLoggerType(parameter.Type));
+            var hasLogLevelParameter = parsedIdentity.Parameters.Any(parameter => parameter.Type == "Microsoft.Extensions.Logging.LogLevel");
+            if (!hasLoggerParameter || !@event.ParameterForms.Contains("ILogger", StringComparer.Ordinal) ||
+                hasLogLevelParameter != @event.ParameterForms.Contains("LogLevel", StringComparer.Ordinal) ||
+                parsedIdentity.Parameters.Any(parameter => parameter.Type == "System.Exception") && !@event.ParameterForms.Contains("Exception", StringComparer.Ordinal))
+            {
+                throw new ManifestValidationException("A manifest event parameter form contradicts its canonical method identity.");
             }
 
             foreach (var placeholder in @event.Placeholders)
@@ -485,6 +525,120 @@ internal static class ManifestJson
 
     private static bool IsEffectiveLevel(string? level) => level is "Trace" or "Debug" or "Information" or "Warning" or "Error" or "Critical" or "None" or "Dynamic" || int.TryParse(level, out _);
 
+    private static ParsedMethodIdentity ParseMethodIdentity(string identity)
+    {
+        var aritySeparator = identity.LastIndexOf('`');
+        var openingParenthesis = aritySeparator >= 0 ? identity.IndexOf('(', aritySeparator + 1) : -1;
+        if (openingParenthesis < 0 || identity[^1] != ')')
+        {
+            throw new ManifestValidationException("A manifest event contains a malformed method identity.");
+        }
+
+        var methodSeparator = aritySeparator > 0 ? identity.LastIndexOf('.', aritySeparator - 1) : -1;
+        if (methodSeparator <= 0 || aritySeparator <= methodSeparator + 1 || openingParenthesis <= aritySeparator + 1)
+        {
+            throw new ManifestValidationException("A manifest event contains a malformed method identity.");
+        }
+
+        var containingType = identity[..methodSeparator];
+        var method = identity[(methodSeparator + 1)..aritySeparator];
+        var arityText = identity[(aritySeparator + 1)..openingParenthesis];
+        if (containingType.Length == 0 || method.Length == 0 ||
+            !string.Equals(containingType, containingType.Trim(), StringComparison.Ordinal) ||
+            !string.Equals(method, method.Trim(), StringComparison.Ordinal) ||
+            !IsCanonicalTypeSyntax(containingType) || !IsCanonicalIdentifier(method) ||
+            !int.TryParse(arityText, out var genericArity) || genericArity < 0 ||
+            !string.Equals(arityText, genericArity.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal))
+        {
+            throw new ManifestValidationException("A manifest event contains a malformed method identity.");
+        }
+
+        var parameters = ParseIdentityParameters(identity[(openingParenthesis + 1)..^1]);
+        var canonical = containingType + "." + method + "`" + genericArity.ToString(System.Globalization.CultureInfo.InvariantCulture) + "(" + string.Join(",", parameters.Select(parameter => parameter.RefKind + ":" + parameter.Type)) + ")";
+        if (!string.Equals(identity, canonical, StringComparison.Ordinal))
+        {
+            throw new ManifestValidationException("A manifest event contains a non-canonical method identity.");
+        }
+
+        return new ParsedMethodIdentity(containingType, method, genericArity, parameters);
+    }
+
+    private static bool IsLoggerType(string type) =>
+        type == "Microsoft.Extensions.Logging.ILogger" ||
+        type.StartsWith("Microsoft.Extensions.Logging.ILogger<", StringComparison.Ordinal) && type.EndsWith('>');
+
+    private static IReadOnlyList<ParsedParameterIdentity> ParseIdentityParameters(string value)
+    {
+        if (value.Length == 0)
+        {
+            return Array.Empty<ParsedParameterIdentity>();
+        }
+
+        var parameters = new List<ParsedParameterIdentity>();
+        var start = 0;
+        var angleDepth = 0;
+        var bracketDepth = 0;
+        var parenthesisDepth = 0;
+        for (var index = 0; index <= value.Length; index++)
+        {
+            if (index < value.Length)
+            {
+                switch (value[index])
+                {
+                    case '<': angleDepth++; break;
+                    case '>': angleDepth--; break;
+                    case '[': bracketDepth++; break;
+                    case ']': bracketDepth--; break;
+                    case '(': parenthesisDepth++; break;
+                    case ')': parenthesisDepth--; break;
+                }
+
+                if (angleDepth < 0 || bracketDepth < 0 || parenthesisDepth < 0)
+                {
+                    throw new ManifestValidationException("A manifest event contains a malformed method identity.");
+                }
+            }
+
+            if (index != value.Length && (value[index] != ',' || angleDepth != 0 || bracketDepth != 0 || parenthesisDepth != 0))
+            {
+                continue;
+            }
+
+            if (angleDepth != 0 || bracketDepth != 0 || parenthesisDepth != 0)
+            {
+                throw new ManifestValidationException("A manifest event contains a malformed method identity.");
+            }
+
+            var parameter = value[start..index];
+            var refKindSeparator = parameter.IndexOf(':');
+            if (refKindSeparator <= 0 || refKindSeparator == parameter.Length - 1)
+            {
+                throw new ManifestValidationException("A manifest event contains a malformed method identity.");
+            }
+
+            var refKind = parameter[..refKindSeparator];
+            var type = parameter[(refKindSeparator + 1)..];
+            if (!ParameterRefKinds.Contains(refKind) || !string.Equals(type, type.Trim(), StringComparison.Ordinal) || type.Contains("global::", StringComparison.Ordinal) || !IsCanonicalTypeSyntax(type))
+            {
+                throw new ManifestValidationException("A manifest event contains a malformed method identity.");
+            }
+
+            parameters.Add(new ParsedParameterIdentity(refKind, type));
+            start = index + 1;
+        }
+
+        return parameters;
+    }
+
+    private static bool IsCanonicalTypeSyntax(string value)
+    {
+        var syntax = SyntaxFactory.ParseTypeName(value);
+        return !syntax.ContainsDiagnostics && syntax.FullSpan.Length == value.Length && string.Equals(syntax.ToFullString(), value, StringComparison.Ordinal);
+    }
+
+    private static bool IsCanonicalIdentifier(string value) =>
+        SyntaxFacts.IsValidIdentifier(value) || SyntaxFacts.GetKeywordKind(value) != SyntaxKind.None;
+
     private static void ValidateJsonSource(JsonElement parent, string name)
     {
         if (!parent.TryGetProperty(name, out var source) || source.ValueKind != JsonValueKind.Object)
@@ -503,6 +657,10 @@ internal static class ManifestJson
             throw new ManifestValidationException("A manifest source location is incomplete or contains an absolute or non-canonical path.");
         }
     }
+
+    private sealed record ParsedMethodIdentity(string ContainingType, string Method, int GenericArity, IReadOnlyList<ParsedParameterIdentity> Parameters);
+
+    private sealed record ParsedParameterIdentity(string RefKind, string Type);
 }
 
 internal sealed class ManifestValidationException(string message) : Exception(message);

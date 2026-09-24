@@ -23,6 +23,8 @@ Structured identity fields use exact ordinal semantics: comparisons are case-sen
 
 Analysis diagnostics make an extracted or compared contract untrustworthy. An error returns exit code 3. Warnings remain in a captured manifest for review; comparison rejects any manifest with unsupported declarations through `KMLOGP007`.
 
+Manifest read validation runs before comparison. Malformed or non-canonical method identities, contradictions between a parsed identity and its redundant containing type, method, generic arity, parameter count, ref kinds, or parameter forms, and unknown ref-kind or parameter-form vocabulary are analysis errors. Text output uses the `ANALYSIS ERROR` envelope; JSON places the message in `analysisErrors`, leaves `findings` empty, reports incomplete coverage, and returns exit code 3.
+
 | Code | Condition | Severity and result |
 | --- | --- | --- |
 | KMLOGP001 | Multiple project-source `[LoggerMessage]` declarations share one stable method identity, so generated pairing is ambiguous. | Error; capture/check return exit 3 and no baseline is written. |

@@ -57,6 +57,8 @@ The complete matrix is in the linked [compatibility rules](https://github.com/Ke
 
 Structured identity fields use exact ordinal, case-sensitive comparison. A case-only placeholder rename is `KMLOG102`; `KMLOG301` is only a true prose-only change with unchanged structured shape. If no supported `[LoggerMessage]` declarations are found, `KMLOGP006` is an analysis error: `capture` and `check` return 3, `capture` writes no baseline, and `check` rejects a zero-event baseline. Unsupported declarations are shown with identities and reasons; `check` and `diff` return 3 with `KMLOGP007` because their supported-subset comparison is incomplete. `diff` remains a pure comparison for the zero-event rule, but it still rejects incomplete unsupported coverage.
 
+Manifest identities must agree with their redundant containing type, method, generic arity, parameter count, ref kinds, and parameter forms. Malformed or contradictory identity tuples and unknown parameter vocabularies are analysis errors: text and JSON use their documented analysis-error envelopes and return exit code 3 before comparison.
+
 See the repository [compatibility rules](https://github.com/KeelMatrix/LogSchema/blob/main/COMPATIBILITY-RULES.md) and [manifest schema](https://github.com/KeelMatrix/LogSchema/blob/main/MANIFEST.md) for the complete stable-code and schema contracts.
 
 Options: `--format text|json`, `--severity breaking|warning|all`, `--accept <code>`, `--no-telemetry`, and `--tfm <target-framework>`. Exit codes are 0 clean, 1 gated findings, 2 invalid invocation/configuration, and 3 project-load or analysis failure. V1 contains no telemetry client; `--no-telemetry` is reserved and accepted.
