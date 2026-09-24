@@ -65,6 +65,27 @@ internal sealed class LogSchemaExtractor
             throw new ProjectAnalysisException("Project load failed: no C# projects were found.");
         }
 
+        if (projects.Length > ProjectAnalysisLimits.MaxProjects)
+        {
+            throw new ProjectAnalysisException(ProjectAnalysisLimits.ProjectCountMessage(projects.Length));
+        }
+
+        var totalDocuments = 0;
+        foreach (var project in projects)
+        {
+            var documentCount = project.Documents.Count();
+            if (documentCount > ProjectAnalysisLimits.MaxDocumentsPerProject)
+            {
+                throw new ProjectAnalysisException(ProjectAnalysisLimits.ProjectDocumentCountMessage(project.Name, documentCount));
+            }
+
+            totalDocuments += documentCount;
+            if (totalDocuments > ProjectAnalysisLimits.MaxDocuments)
+            {
+                throw new ProjectAnalysisException(ProjectAnalysisLimits.TotalDocumentCountMessage(totalDocuments));
+            }
+        }
+
         var allProjects = new List<ProjectIdentity>();
         var allEvents = new List<EventContract>();
         var allUnsupported = new List<UnsupportedDeclaration>();

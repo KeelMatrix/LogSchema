@@ -19,3 +19,4 @@ Changes for the KeelMatrix.LogSchema package are recorded here using the Keep a 
 - Byte-deterministic `.nupkg` and `.snupkg` output across canonical-repository attached, detached, and alternate-directory checkouts, plus repeated-pack validation and an LF line-ending checkout contract.
 - Repository-pinned local tool installation and restore instructions, with installed `capture`, `check`, and `diff` validation on Windows, Linux, and macOS.
 - Collision-safe logical source provenance for project, linked outside-project, and generated documents, with fail-closed handling for unsafe or ambiguous identities.
+- Bounded design-time project analysis with clear failures for oversized project and source graphs, including a reproducible resource gate for large SDK-style solutions.
