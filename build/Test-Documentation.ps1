@@ -62,7 +62,7 @@ foreach ($row in @(
     )) {
     Assert-That ($manifest -match $row) "the manifest contract must contain decision-table row: $row"
 }
-Assert-That ($manifest -match 'V1 does not assert semantic base-type classification' -and $manifest -match 'semantic base-type detection to exclude exception parameters from the message placeholder list') 'the manifest contract must distinguish declared-type forms from capture-time placeholder semantics'
+Assert-That ($manifest -match 'V1 does not assert semantic base-type classification' -and $manifest -match 'source-semantic analysis to assign the generator-effective parameter role') 'the manifest contract must distinguish declared-type forms from source-derived generator roles'
 Assert-That ($manifest -match 'comparison-time analysis error' -and $manifest -match 'coverageComplete: false') 'the manifest contract must document the comparison analysis-error envelope'
 $dependencies = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot 'docs/DEPENDENCIES.md')
 Assert-That ($dependencies -match 'nuspec intentionally exposes no external package dependencies' -and $dependencies -match '10\.0\.401') 'dependency documentation must describe the bundled shipping graph and verified SDK'

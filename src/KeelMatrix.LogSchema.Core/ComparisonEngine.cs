@@ -113,36 +113,43 @@ internal static class ComparisonEngine
             findings.Add(Find("KMLOG201", FindingSeverity.Warning, newEvent, "level", oldEvent.Level, newEvent.Level, $"{Display(newEvent)} changed level {oldEvent.Level} -> {newEvent.Level}."));
         }
 
-        var oldNames = oldEvent.Placeholders.Select(p => p.Name).ToArray();
-        var newNames = newEvent.Placeholders.Select(p => p.Name).ToArray();
+        var oldRoles = oldEvent.Parameters.Select(parameter => parameter.Role).ToArray();
+        var newRoles = newEvent.Parameters.Select(parameter => parameter.Role).ToArray();
+        if (oldRoles.Length == newRoles.Length && !oldRoles.SequenceEqual(newRoles, StringComparer.Ordinal))
+        {
+            findings.Add(Find("KMLOG105", FindingSeverity.Breaking, newEvent, "parameterRole", string.Join(", ", oldRoles), string.Join(", ", newRoles), $"{Display(newEvent)} changed generator-effective parameter roles."));
+        }
+
+        var oldNames = oldEvent.StructuredState.Select(property => property.EmittedName).ToArray();
+        var newNames = newEvent.StructuredState.Select(property => property.EmittedName).ToArray();
         var retainedOldNames = RetainedOccurrences(oldNames, newNames);
         var retainedNewNames = RetainedOccurrences(newNames, oldNames);
         if (!retainedOldNames.SequenceEqual(retainedNewNames, StringComparer.Ordinal))
         {
-            findings.Add(Find("KMLOG103", FindingSeverity.Breaking, newEvent, "placeholders", string.Join(", ", retainedOldNames), string.Join(", ", retainedNewNames), $"{Display(newEvent)} changed structured placeholder order."));
+            findings.Add(Find("KMLOG103", FindingSeverity.Breaking, newEvent, "structuredState", string.Join(", ", retainedOldNames), string.Join(", ", retainedNewNames), $"{Display(newEvent)} changed structured-state property order."));
         }
 
         var removed = DifferenceByOccurrence(oldNames, newNames);
         var added = DifferenceByOccurrence(newNames, oldNames);
         if (removed.Count == 1 && added.Count == 1)
         {
-            findings.Add(Find("KMLOG102", FindingSeverity.Breaking, newEvent, "placeholder", removed[0], added[0], $"{Display(newEvent)} changed structured property \"{removed[0]}\" to \"{added[0]}\"."));
+            findings.Add(Find("KMLOG102", FindingSeverity.Breaking, newEvent, "structuredState", removed[0], added[0], $"{Display(newEvent)} changed structured-state property \"{removed[0]}\" to \"{added[0]}\"."));
         }
         else
         {
             foreach (var name in removed.Order(StringComparer.Ordinal))
             {
-                findings.Add(Find("KMLOG101", FindingSeverity.Breaking, newEvent, "placeholder", name, null, $"{Display(newEvent)} removed structured property \"{name}\"."));
+                findings.Add(Find("KMLOG101", FindingSeverity.Breaking, newEvent, "structuredState", name, null, $"{Display(newEvent)} removed structured-state property \"{name}\"."));
             }
             foreach (var name in added.Order(StringComparer.Ordinal))
             {
-                findings.Add(Find("KMLOG104", FindingSeverity.Info, newEvent, "placeholder", null, name, $"{Display(newEvent)} added structured property \"{name}\"."));
+                findings.Add(Find("KMLOG104", FindingSeverity.Info, newEvent, "structuredState", null, name, $"{Display(newEvent)} added structured-state property \"{name}\"."));
             }
         }
 
         if (!string.Equals(oldEvent.Message, newEvent.Message, StringComparison.Ordinal) && oldNames.SequenceEqual(newNames, StringComparer.Ordinal))
         {
-            findings.Add(Find("KMLOG301", FindingSeverity.Info, newEvent, "message", oldEvent.Message, newEvent.Message, $"{Display(newEvent)} changed message template prose."));
+            findings.Add(Find("KMLOG301", FindingSeverity.Info, newEvent, "template", oldEvent.Message, newEvent.Message, $"{Display(newEvent)} changed the message template without changing structured state."));
         }
     }
 

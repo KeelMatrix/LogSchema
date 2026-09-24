@@ -308,10 +308,14 @@ Exit codes:
   3 project-load or analysis failure, including zero supported events
 
 Compatibility summary:
-  BREAKING EventId/EventName changes and placeholder removal, rename, or order changes (default gate).
-  WARNING  LogLevel changes (use --severity warning to gate).
-  INFO     Event/placeholder additions and prose-only template changes with unchanged structured shape.
-  Structured identity fields use exact ordinal comparison; case-only placeholder renames are KMLOG102.
+  BREAKING EventId/EventName changes, structured-state removal/rename/order changes, and parameter-role changes (default gate).
+  WARNING  Fixed/dynamic or named LogLevel changes (use --severity warning to gate).
+  INFO     Event/structured-state additions and message-template changes with unchanged structured state.
+  A placeholder is one occurrence in the message template. Structured state is the unique, method-ordered
+  set of emitted properties produced by the generator; a matched placeholder supplies its emitted casing,
+  otherwise the ordinary parameter name is emitted. Parameter roles record the first logger, exception,
+  and dynamic-level arguments; later candidates are state parameters. Fixed and dynamic level sources are distinct.
+  Structured identity fields use exact ordinal comparison; case-only emitted-property renames are KMLOG102.
   Declared type text must be canonical; forms are classified structurally: top-level ILogger arity 0/1,
   exact top-level LogLevel or Exception, else None. Non-canonical text and form contradictions return 3
   with incomplete coverage and no findings. Raw type prefixes and suffixes are never trusted.

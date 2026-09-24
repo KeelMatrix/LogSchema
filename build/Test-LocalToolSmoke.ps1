@@ -187,6 +187,25 @@ try {
     $fixedNoneEvent = @($capturedManifest.events | Where-Object method -eq 'FixedNone')
     Assert-That ($fixedNoneEvent.Count -eq 1 -and $fixedNoneEvent[0].level -eq 'None') 'installed capture must preserve explicit LogLevel.None'
 
+    $absentStateEvent = @($capturedManifest.events | Where-Object method -eq 'AbsentState')
+    Assert-That ($absentStateEvent.Count -eq 1 -and @($absentStateEvent[0].placeholders).Count -eq 0 -and @($absentStateEvent[0].structuredState).Count -eq 1 -and $absentStateEvent[0].structuredState[0].emittedName -eq 'customerId' -and $absentStateEvent[0].parameters[1].role -eq 'State') 'installed capture must preserve an ordinary parameter absent from the template as structured state'
+    $methodOrderEvent = @($capturedManifest.events | Where-Object method -eq 'MethodOrder')
+    Assert-That ($methodOrderEvent.Count -eq 1 -and ((@($methodOrderEvent[0].placeholders) | ForEach-Object name) -join ',') -eq 'Second,First' -and ((@($methodOrderEvent[0].structuredState) | ForEach-Object emittedName) -join ',') -eq 'First,Second') 'installed capture must keep template occurrences separate from method-ordered structured state'
+    $repeatedEvent = @($capturedManifest.events | Where-Object method -eq 'RepeatedPlaceholder')
+    Assert-That ($repeatedEvent.Count -eq 1 -and @($repeatedEvent[0].placeholders).Count -eq 2 -and @($repeatedEvent[0].structuredState).Count -eq 1) 'installed capture must retain repeated template occurrences without duplicating state properties'
+    $casingEvent = @($capturedManifest.events | Where-Object method -eq 'PlaceholderCasing')
+    Assert-That ($casingEvent.Count -eq 1 -and $casingEvent[0].structuredState[0].emittedName -eq 'DisplayValue') 'installed capture must preserve matched placeholder casing as the emitted property name'
+    $removedPlaceholderEvent = @($capturedManifest.events | Where-Object method -eq 'PlaceholderRemoved')
+    Assert-That ($removedPlaceholderEvent.Count -eq 1 -and @($removedPlaceholderEvent[0].placeholders).Count -eq 0 -and $removedPlaceholderEvent[0].structuredState[0].emittedName -eq 'value') 'installed capture must retain the state property when its template occurrence is removed'
+    $multipleExceptionEvent = @($capturedManifest.events | Where-Object method -eq 'MultipleExceptions')
+    Assert-That ($multipleExceptionEvent.Count -eq 1 -and $multipleExceptionEvent[0].parameters[1].role -eq 'Exception' -and $multipleExceptionEvent[0].parameters[2].role -eq 'State' -and $multipleExceptionEvent[0].structuredState[0].emittedName -eq 'second') 'installed capture must apply first-exception semantics'
+    $multipleLoggerEvent = @($capturedManifest.events | Where-Object method -eq 'MultipleLoggers')
+    Assert-That ($multipleLoggerEvent.Count -eq 1 -and $multipleLoggerEvent[0].loggerParameter -eq 'firstLogger' -and $multipleLoggerEvent[0].parameters[1].role -eq 'State') 'installed capture must apply first-logger semantics'
+    $multipleLevelEvent = @($capturedManifest.events | Where-Object method -eq 'MultipleDynamicLevels')
+    Assert-That ($multipleLevelEvent.Count -eq 1 -and $multipleLevelEvent[0].levelSource -eq 'Dynamic' -and $multipleLevelEvent[0].levelParameter -eq 'firstLevel' -and $multipleLevelEvent[0].parameters[2].role -eq 'State') 'installed capture must apply first-dynamic-level semantics'
+    $specialTemplateEvent = @($capturedManifest.events | Where-Object method -eq 'SpecialExceptionInTemplate')
+    Assert-That ($specialTemplateEvent.Count -eq 1 -and $specialTemplateEvent[0].parameters[1].role -eq 'Exception' -and $specialTemplateEvent[0].structuredState[0].emittedName -eq 'exception') 'installed capture must retain the generator-specific exception state when the special parameter is referenced'
+
     $clean = Invoke-LocalTool -Label 'local-manifest clean check' -Arguments @('check', $consumerProject, '--baseline', $baseline, '--no-telemetry')
     Assert-That ($clean.ExitCode -eq 0 -and $clean.Output -match 'LogSchema: no gated incompatibilities found\.') 'manifest-pinned clean check must return exit 0'
 
@@ -280,6 +299,14 @@ try {
         $parameters = for ($index = 0; $index -lt $formRows.Count; $index++) {
             "None:$($Forms[$index]):$($formRows[$index].Type)"
         }
+        $parameterRecords = @(
+            [pscustomobject]@{ name = 'logger'; type = 'Microsoft.Extensions.Logging.ILogger'; refKind = 'None'; role = 'Logger' },
+            [pscustomobject]@{ name = 'level'; type = 'Microsoft.Extensions.Logging.LogLevel'; refKind = 'None'; role = 'DynamicLevel' },
+            [pscustomobject]@{ name = 'exception'; type = 'System.Exception'; refKind = 'None'; role = 'Exception' },
+            [pscustomobject]@{ name = 'derived'; type = 'DerivedProblem'; refKind = 'None'; role = 'State' },
+            [pscustomobject]@{ name = 'ordinary'; type = 'OrdinaryProblem'; refKind = 'None'; role = 'State' },
+            [pscustomobject]@{ name = 'value'; type = 'string'; refKind = 'None'; role = 'State' }
+        )
         $matrixManifest.events = @([pscustomobject]@{
                 projectKey = [string]$matrixManifest.projects[0].key
                 identity = 'Logging.FormMatrix`0(' + ($parameters -join ',') + ')'
@@ -293,6 +320,16 @@ try {
                 message = 'Form matrix'
                 placeholders = @()
                 parameterForms = @($Forms)
+                parameters = $parameterRecords
+                structuredState = @(
+                    [pscustomobject]@{ parameterName = 'derived'; emittedName = 'derived' },
+                    [pscustomobject]@{ parameterName = 'ordinary'; emittedName = 'ordinary' },
+                    [pscustomobject]@{ parameterName = 'value'; emittedName = 'value' }
+                )
+                loggerParameter = 'logger'
+                exceptionParameter = 'exception'
+                levelSource = 'Dynamic'
+                levelParameter = 'level'
                 source = [pscustomobject]@{ file = 'CanonicalIdentityLogging.cs'; line = 1; kind = 'source' }
             })
         $matrixManifest.unsupported = @()
@@ -371,7 +408,7 @@ try {
 
     $derivedEvent = @($capturedManifest.events | Where-Object method -eq 'DerivedException')
     Assert-That ($derivedEvent.Count -eq 1 -and (@($derivedEvent[0].parameterForms) -join ',') -eq 'ILogger,None' -and ([string]$derivedEvent[0].identity).Contains(':None:DerivedProblem', [StringComparison]::Ordinal)) 'installed capture must support a non-suffix derived exception while recording its declared type with form None'
-    Assert-That (@($derivedEvent[0].placeholders).Count -eq 0) 'installed capture must keep a derived exception out of the message placeholder list'
+    Assert-That (@($derivedEvent[0].placeholders).Count -eq 0) 'installed capture must keep a derived exception out of message-template placeholder occurrences'
     $exactExceptionEvent = @($capturedManifest.events | Where-Object method -eq 'ExactException')
     Assert-That ($exactExceptionEvent.Count -eq 1 -and (@($exactExceptionEvent[0].parameterForms) -join ',') -eq 'ILogger,Exception' -and ([string]$exactExceptionEvent[0].identity).Contains(':Exception:System.Exception', [StringComparison]::Ordinal)) 'installed capture must preserve the canonical exact System.Exception form'
     $ordinaryCustomEvent = @($capturedManifest.events | Where-Object method -eq 'OrdinaryCustom')
@@ -397,7 +434,7 @@ try {
     $source = $source.Replace('Processed {OrderId}', 'Processed {AccountId}').Replace('int orderId', 'int accountId')
     Set-Content -LiteralPath $sourcePath -Value $source -Encoding utf8NoBOM
     $mutated = Invoke-LocalTool -Label 'local-manifest mutated check' -Arguments @('check', $consumerProject, '--baseline', $baseline, '--no-telemetry')
-    $expectedDiagnostic = 'BREAKING KMLOG102 ConsumerProcessed changed structured property "OrderId" to "AccountId".'
+    $expectedDiagnostic = 'BREAKING KMLOG102 ConsumerProcessed changed structured-state property "OrderId" to "AccountId".'
     Assert-That ($mutated.ExitCode -eq 1 -and $mutated.Output.Contains($expectedDiagnostic)) "mutated check must contain the exact diagnostic: $expectedDiagnostic"
 
     $mutatedManifest = Join-Path $freshCheckout 'mutated.json'
@@ -405,6 +442,30 @@ try {
     Assert-That ($mutatedCapture.ExitCode -eq 0 -and (Test-Path -LiteralPath $mutatedManifest)) 'installed mutated capture must write a second manifest'
     $mutatedDiff = Invoke-LocalTool -Label 'local-manifest breaking diff' -Arguments @('diff', $baseline, $mutatedManifest, '--no-telemetry')
     Assert-That ($mutatedDiff.ExitCode -eq 1 -and $mutatedDiff.Output.Contains($expectedDiagnostic)) 'installed diff must report the same breaking structured rename'
+
+    $stateSourcePath = Join-Path $freshCheckout 'GeneratorStateLogging.cs'
+    $stateSource = Get-Content -Raw -LiteralPath $stateSourcePath
+    $stateSource = $stateSource.Replace('int customerId', 'int accountId')
+    Set-Content -LiteralPath $stateSourcePath -Value $stateSource -Encoding utf8NoBOM
+    $absentRename = Invoke-LocalTool -Label 'local-manifest absent-state rename check' -Arguments @('check', $consumerProject, '--baseline', $baseline, '--no-telemetry')
+    Assert-That ($absentRename.ExitCode -eq 1 -and $absentRename.Output -match 'BREAKING KMLOG102 AbsentState changed structured-state property "customerId" to "accountId".') 'installed check must gate a rename of an unreferenced ordinary state parameter'
+    $absentRenameManifest = Join-Path $freshCheckout 'absent-state-renamed.json'
+    $absentRenameCapture = Invoke-LocalTool -Label 'local-manifest absent-state rename capture' -Arguments @('capture', $consumerProject, '--output', $absentRenameManifest, '--no-telemetry')
+    Assert-That ($absentRenameCapture.ExitCode -eq 0) 'installed capture must write the absent-state rename manifest'
+    $absentRenameDiff = Invoke-LocalTool -Label 'local-manifest absent-state rename diff' -Arguments @('diff', $baseline, $absentRenameManifest, '--no-telemetry')
+    Assert-That ($absentRenameDiff.ExitCode -eq 1 -and $absentRenameDiff.Output -match 'KMLOG102') 'installed diff must report the absent-state rename'
+
+    $stateSource = $stateSource.Replace('int accountId', 'int customerId')
+    $stateSource = $stateSource.Replace('int first, int second', 'int second, int first')
+    Set-Content -LiteralPath $stateSourcePath -Value $stateSource -Encoding utf8NoBOM
+    $orderMutation = Invoke-LocalTool -Label 'local-manifest method-order check' -Arguments @('check', $consumerProject, '--baseline', $baseline, '--no-telemetry')
+    Assert-That ($orderMutation.ExitCode -eq 1 -and $orderMutation.Output -match 'KMLOG103 MethodOrder changed structured-state property order.') 'installed check must detect method-order state changes when template text is unchanged'
+
+    $stateSource = $stateSource.Replace('int second, int first', 'int first, int second')
+    $stateSource = $stateSource.Replace('RoleFlipProblem : Exception', 'RoleFlipProblem')
+    Set-Content -LiteralPath $stateSourcePath -Value $stateSource -Encoding utf8NoBOM
+    $roleMutation = Invoke-LocalTool -Label 'local-manifest parameter-role check' -Arguments @('check', $consumerProject, '--baseline', $baseline, '--severity', 'all', '--no-telemetry')
+    Assert-That ($roleMutation.ExitCode -eq 1 -and $roleMutation.Output -match 'KMLOG105') 'installed check must detect a semantic exception-to-state role change'
 
     $source = Get-Content -Raw -LiteralPath $sourcePath
     $source = $source.Replace('Processed {AccountId}', 'Processed {OrderId}').Replace('int accountId', 'int orderId').Replace('[LoggerMessage(Message = "Dynamic level {Value}")]', '[LoggerMessage(Level = LogLevel.None, Message = "Dynamic level {Value}")]')

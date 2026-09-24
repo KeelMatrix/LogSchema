@@ -177,5 +177,12 @@ public sealed class ComparisonEngineTests
 
     private static ManifestDocument Manifest(params EventContract[] events) => new(1, [new ProjectIdentity("P|net8.0", "P", "P", "net8.0")], events, [], [], [], []);
 
-    private static EventContract Event(string method, int eventId, string eventName, string level, string message, params string[] placeholders) => new("P|net8.0", "P.Logging." + method + "`0(None:ILogger:Microsoft.Extensions.Logging.ILogger)", "P.Logging", method, 0, ["None"], eventId, eventName, level, message, placeholders.Select(name => new Placeholder(name, name)).ToArray(), ["ILogger"], new SourceLocation("Logging.cs", 1, "source"));
+    private static EventContract Event(string method, int eventId, string eventName, string level, string message, params string[] placeholders)
+    {
+        var state = placeholders.Select(name => new StructuredStateProperty(name, name)).ToArray();
+        var parameters = new[] { new ParameterContract("logger", "Microsoft.Extensions.Logging.ILogger", "None", "Logger") }
+            .Concat(placeholders.Select(name => new ParameterContract(name, "string", "None", "State")))
+            .ToArray();
+        return new EventContract("P|net8.0", "P.Logging." + method + "`0(None:ILogger:Microsoft.Extensions.Logging.ILogger)", "P.Logging", method, 0, ["None"], eventId, eventName, level, message, placeholders.Select(name => new Placeholder(name, name)).ToArray(), ["ILogger"], new SourceLocation("Logging.cs", 1, "source"), parameters, state, "logger", null, "Fixed", null);
+    }
 }

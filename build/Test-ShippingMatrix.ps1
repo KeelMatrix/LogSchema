@@ -88,7 +88,7 @@ function Assert-OrdinaryFixture {
     }
 
     Assert-That ($events.ConstantArguments.eventId -eq 1001 -and $events.ConstantArguments.eventName -eq 'OrderCreated' -and $events.ConstantArguments.level -eq 'Warning') "$Name constant attribute values must be effective"
-    Assert-That ((@($events.ConstantArguments.placeholders.name) -join ',') -eq 'OrderId,CustomerName') "$Name placeholder order must be preserved"
+    Assert-That ((@($events.ConstantArguments.placeholders.name) -join ',') -eq 'OrderId,CustomerName') "$Name message-template occurrence order must be preserved"
     Assert-That ($events.ConstructorArguments.eventId -eq 1002 -and @($events.ConstructorArguments.parameterForms) -contains 'Exception') "$Name constructor arguments and exception form must be represented"
     Assert-That ($events.DefaultEventName.eventName -eq 'DefaultEventName') "$Name omitted EventName must use the method name"
     Assert-That ($events.ExplicitEventName.eventName -eq 'ExplicitEventName') "$Name explicit EventName must be preserved"
