@@ -473,40 +473,20 @@ internal static class ManifestJson
                 throw new ManifestValidationException("A manifest event identity contradicts its canonical event fields.");
             }
 
+            var embeddedForms = parsedIdentity.Parameters.Select(parameter => parameter.Form).ToArray();
+            var requiredForms = parsedIdentity.Parameters.Select(parameter => GetRequiredParameterForm(parameter.Type)).ToArray();
             if (@event.ParameterRefKinds.Any(kind => !ParameterRefKinds.Contains(kind)) ||
                 @event.ParameterForms.Count != parsedIdentity.Parameters.Count ||
                 @event.ParameterForms.Any(form => !ParameterForms.Contains(form)) ||
-                !parsedIdentity.Parameters.Select(parameter => parameter.Form).SequenceEqual(@event.ParameterForms, StringComparer.Ordinal))
+                !embeddedForms.SequenceEqual(requiredForms, StringComparer.Ordinal) ||
+                !@event.ParameterForms.SequenceEqual(requiredForms, StringComparer.Ordinal))
             {
-                throw new ManifestValidationException("A manifest event parameter form contradicts its canonical method identity.");
+                throw new ManifestValidationException("A manifest event parameter form contradicts the required form for its canonical declared type.");
             }
 
-            var hasLoggerParameter = false;
-            for (var index = 0; index < parsedIdentity.Parameters.Count; index++)
+            if (!requiredForms.Contains("ILogger", StringComparer.Ordinal))
             {
-                var parameterType = parsedIdentity.Parameters[index].Type;
-                var form = parsedIdentity.Parameters[index].Form;
-                if (IsLoggerType(parameterType))
-                {
-                    hasLoggerParameter = true;
-                    if (form != "ILogger") throw new ManifestValidationException("A manifest event parameter form contradicts its canonical method identity.");
-                }
-                else if (parameterType == "Microsoft.Extensions.Logging.LogLevel")
-                {
-                    if (form != "LogLevel") throw new ManifestValidationException("A manifest event parameter form contradicts its canonical method identity.");
-                }
-                else if (parameterType == "System.Exception")
-                {
-                    if (form != "Exception") throw new ManifestValidationException("A manifest event parameter form contradicts its canonical method identity.");
-                }
-                else if (form == "ILogger" || form == "LogLevel" || form == "Exception" && IsKnownNonExceptionType(parameterType))
-                {
-                    throw new ManifestValidationException("A manifest event parameter form contradicts its canonical method identity.");
-                }
-            }
-            if (!hasLoggerParameter)
-            {
-                throw new ManifestValidationException("A manifest event parameter form contradicts its canonical method identity.");
+                throw new ManifestValidationException("A manifest event parameter form contradicts the required form for its canonical declared type.");
             }
 
             foreach (var placeholder in @event.Placeholders)
@@ -597,12 +577,13 @@ internal static class ManifestJson
         type == "Microsoft.Extensions.Logging.ILogger" ||
         type.StartsWith("Microsoft.Extensions.Logging.ILogger<", StringComparison.Ordinal) && type.EndsWith('>');
 
-    private static bool IsKnownNonExceptionType(string type)
-    {
-        var normalized = type.EndsWith('?') ? type[..^1] : type;
-        return normalized is "bool" or "byte" or "sbyte" or "short" or "ushort" or "int" or "uint" or "long" or "ulong" or "nint" or "nuint" or "char" or "float" or "double" or "decimal" or "string" or "object" or "dynamic" or
-            "System.Boolean" or "System.Byte" or "System.SByte" or "System.Int16" or "System.UInt16" or "System.Int32" or "System.UInt32" or "System.Int64" or "System.UInt64" or "System.IntPtr" or "System.UIntPtr" or "System.Char" or "System.Single" or "System.Double" or "System.Decimal" or "System.String" or "System.Object";
-    }
+    internal static string GetRequiredParameterForm(string type) => IsLoggerType(type)
+        ? "ILogger"
+        : type == "Microsoft.Extensions.Logging.LogLevel"
+            ? "LogLevel"
+            : type == "System.Exception"
+                ? "Exception"
+                : "None";
 
     private static IReadOnlyList<ParsedParameterIdentity> ParseIdentityParameters(string value)
     {

@@ -25,16 +25,19 @@ foreach ($readme in @($rootReadme, $packageReadme)) {
     Assert-That ($readme -match '(?m)^### Global tool alternative$') 'the global installation path must be clearly separate'
     Assert-That ($readme -match '(?m)^dotnet tool install --global KeelMatrix\.LogSchema$') 'the global alternative must remain documented'
     Assert-That ($readme -match '\.NET 8 runtime' -and $readme -match '10\.0\.401') 'consumer runtime and verified project-loading SDK prerequisites must be explicit'
+    Assert-That ($readme -match 'recomputes? every parameter form|recomputes? each parameter form' -and $readme -match 'derived exception' -and $readme -match 'form `None`') 'consumer documentation must describe reader-computed forms and supported derived exceptions'
     Assert-That ($readme -notmatch '(?i)company integration|later package step|package step') 'product documentation must not contain obsolete internal integration or packaging-stage wording'
 }
 
 $phase0 = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot 'docs/PHASE0-FEASIBILITY.md')
 Assert-That ($phase0 -match 'build/Test-ShippingMatrix\.ps1') 'semantic fixture documentation must identify the shipping implementation matrix'
 Assert-That ($phase0 -match 'Success of the feasibility probe alone is not evidence') 'semantic fixture documentation must distinguish feasibility and shipping evidence'
+Assert-That ($phase0 -match 'packaged type-by-form matrix' -and $phase0 -match 'symmetric forged-vs-forged') 'semantic fixture documentation must describe the packaged form matrix'
 Assert-That ($phase0 -notmatch '(?i)candidate SHA|independent re-verification|specification section|contains no shipping CLI') 'semantic fixture documentation must not retain obsolete milestone or review material'
 
 $security = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot 'SECURITY.md')
 Assert-That ($security -match '0\.1\.x' -and $security -match '0\.1\.0') 'supported security versions must name the intended first release line'
+Assert-That ($security -match 'recomputes every parameter form solely from its canonical declared type' -and $security -match 'does not trust a manifest to assert arbitrary type-hierarchy semantics') 'security documentation must describe the reader-computed authenticity boundary'
 Assert-That ($security -notmatch 'current supported release line is v1') 'supported security versions must not use the obsolete v1 line'
 
 $diagnostics = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot 'COMPATIBILITY-RULES.md')
@@ -49,8 +52,16 @@ $privacy = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot 'PRIVACY.md'
 Assert-That ($privacy -match 'contains no telemetry client' -and $privacy -match 'makes no network requests') 'privacy claims must match the shipping implementation'
 $manifest = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot 'MANIFEST.md')
 Assert-That ($manifest -match 'contains no telemetry client' -and $manifest -match '10\.0\.401') 'manifest privacy and SDK claims must match the shipping implementation'
-Assert-That ($manifest -match '<ref-kind>:<semantic-form>:<canonical-type>' -and $manifest -match 'parameterForms.*parsed ref-kind or semantic-form vector' -and $manifest -match 'additive, subtractive, or substituted') 'the manifest contract must document self-verifying canonical parameter forms'
-Assert-That ($manifest -match 'exact `System\.Exception`' -and $manifest -match 'non-suffix derived exception' -and $manifest -match 'ordinary custom types') 'the manifest contract must document the complete semantic-form decision table'
+Assert-That ($manifest -match '<ref-kind>:<semantic-form>:<canonical-type>' -and $manifest -match 'recomputes the required form vector' -and $manifest -match 'additive, subtractive, or substituted') 'the manifest contract must document reader-computed canonical parameter forms'
+foreach ($row in @(
+        '`Microsoft.Extensions.Logging.ILogger` \(including constructed logger types\).*`ILogger`',
+        'exact `Microsoft.Extensions.Logging.LogLevel`.*`LogLevel`',
+        'exact `System.Exception`.*`Exception`',
+        'every other type, including any type that derives from `System.Exception`.*`None`'
+    )) {
+    Assert-That ($manifest -match $row) "the manifest contract must contain decision-table row: $row"
+}
+Assert-That ($manifest -match 'V1 does not assert semantic base-type classification' -and $manifest -match 'semantic base-type detection to exclude exception parameters from the message placeholder list') 'the manifest contract must distinguish declared-type forms from capture-time placeholder semantics'
 Assert-That ($manifest -match 'comparison-time analysis error' -and $manifest -match 'coverageComplete: false') 'the manifest contract must document the comparison analysis-error envelope'
 $dependencies = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot 'docs/DEPENDENCIES.md')
 Assert-That ($dependencies -match 'nuspec intentionally exposes no external package dependencies' -and $dependencies -match '10\.0\.401') 'dependency documentation must describe the bundled shipping graph and verified SDK'

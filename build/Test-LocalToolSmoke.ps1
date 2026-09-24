@@ -200,29 +200,13 @@ try {
         )
 
         $tamperedManifest = Get-Content -Raw -LiteralPath $baseline | ConvertFrom-Json
-        $targetMethod = if ($Mutation -in @('derived-as-none', 'derived-coordinated-none')) { 'DerivedException' } else { 'Event' }
+        $targetMethod = 'Event'
         $targetEvents = @($tamperedManifest.events | Where-Object method -eq $targetMethod)
         Assert-That ($targetEvents.Count -eq 1) "the installed capture must contain the canonical $targetMethod identity"
         $targetEvent = $targetEvents[0]
         switch ($Mutation) {
             'reviewer-exact' {
                 $targetEvent.parameterForms = @('Exception', 'ILogger')
-            }
-            'string-as-exception' {
-                $forms = @($targetEvent.parameterForms)
-                $forms[1] = 'Exception'
-                $targetEvent.parameterForms = $forms
-            }
-            'derived-as-none' {
-                $forms = @($targetEvent.parameterForms)
-                $forms[1] = 'None'
-                $targetEvent.parameterForms = $forms
-            }
-            'derived-coordinated-none' {
-                $targetEvent.identity = ([string]$targetEvent.identity).Replace(':Exception:DerivedProblem', ':None:DerivedProblem')
-                $forms = @($targetEvent.parameterForms)
-                $forms[1] = 'None'
-                $targetEvent.parameterForms = $forms
             }
             'wrong-containing-type' { $targetEvent.containingType = 'Totally.Wrong.Type' }
             'wrong-method' { $targetEvent.method = 'WrongMethod' }
@@ -275,21 +259,90 @@ try {
         Assert-AnalysisErrorEnvelope -Result $tamperedDiff -Label "installed $mutation diff" -ForbiddenPath $freshCheckout
     }
 
-    foreach ($mutation in @('string-as-exception', 'derived-as-none')) {
-        $symmetricManifest = Join-Path $freshCheckout "symmetric-$mutation.json"
-        Write-IdentityMutation -Mutation $mutation -Destination $symmetricManifest
-        $symmetricDiff = Invoke-LocalTool -Label "local-manifest symmetric $mutation diff" -Arguments @('diff', $symmetricManifest, $symmetricManifest, '--format', 'json', '--severity', 'all', '--no-telemetry')
-        Assert-AnalysisErrorEnvelope -Result $symmetricDiff -Label "installed symmetric $mutation diff" -ForbiddenPath $freshCheckout
+    $formRows = @(
+        [pscustomobject]@{ Type = 'Microsoft.Extensions.Logging.ILogger'; Expected = 'ILogger' },
+        [pscustomobject]@{ Type = 'Microsoft.Extensions.Logging.LogLevel'; Expected = 'LogLevel' },
+        [pscustomobject]@{ Type = 'System.Exception'; Expected = 'Exception' },
+        [pscustomobject]@{ Type = 'DerivedProblem'; Expected = 'None' },
+        [pscustomobject]@{ Type = 'OrdinaryProblem'; Expected = 'None' },
+        [pscustomobject]@{ Type = 'string'; Expected = 'None' }
+    )
+    $requiredForms = @($formRows | ForEach-Object Expected)
+    $allForms = @('None', 'Exception', 'ILogger', 'LogLevel')
+
+    function Write-FormMatrixManifest {
+        param(
+            [Parameter(Mandatory = $true)][string[]]$Forms,
+            [Parameter(Mandatory = $true)][string]$Destination
+        )
+
+        $matrixManifest = Get-Content -Raw -LiteralPath $baseline | ConvertFrom-Json
+        $parameters = for ($index = 0; $index -lt $formRows.Count; $index++) {
+            "None:$($Forms[$index]):$($formRows[$index].Type)"
+        }
+        $matrixManifest.events = @([pscustomobject]@{
+                projectKey = [string]$matrixManifest.projects[0].key
+                identity = 'Logging.FormMatrix`0(' + ($parameters -join ',') + ')'
+                containingType = 'Logging'
+                method = 'FormMatrix'
+                genericArity = 0
+                parameterRefKinds = @($formRows | ForEach-Object { 'None' })
+                eventId = 1200
+                eventName = 'FormMatrix'
+                level = 'Dynamic'
+                message = 'Form matrix'
+                placeholders = @()
+                parameterForms = @($Forms)
+                source = [pscustomobject]@{ file = 'CanonicalIdentityLogging.cs'; line = 1; kind = 'source' }
+            })
+        $matrixManifest.unsupported = @()
+        $matrixManifest.analysisIssues = @()
+        $matrixManifest.compilationDiagnosticKinds = @()
+        $matrixManifest.workspaceDiagnosticKinds = @()
+        $matrixManifest | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $Destination -Encoding utf8NoBOM
     }
 
-    $comparisonFormManifest = Join-Path $freshCheckout 'comparison-derived-coordinated-none.json'
-    Write-IdentityMutation -Mutation 'derived-coordinated-none' -Destination $comparisonFormManifest
-    $comparisonFormCheck = Invoke-LocalTool -Label 'local-manifest comparison-form check' -Arguments @('check', $consumerProject, '--baseline', $comparisonFormManifest, '--format', 'json', '--severity', 'all', '--no-telemetry')
-    Assert-AnalysisErrorEnvelope -Result $comparisonFormCheck -Label 'installed comparison-form check' -ForbiddenPath $freshCheckout
-    Assert-That ($comparisonFormCheck.Output -match 'compared canonical method identity') 'installed comparison-form check must exercise the comparison-originated analysis error'
-    $comparisonFormDiff = Invoke-LocalTool -Label 'local-manifest comparison-form diff' -Arguments @('diff', $baseline, $comparisonFormManifest, '--format', 'json', '--severity', 'all', '--no-telemetry')
-    Assert-AnalysisErrorEnvelope -Result $comparisonFormDiff -Label 'installed comparison-form diff' -ForbiddenPath $freshCheckout
-    Assert-That ($comparisonFormDiff.Output -match 'compared canonical method identity') 'installed comparison-form diff must exercise the comparison-originated analysis error'
+    for ($position = 0; $position -lt $formRows.Count; $position++) {
+        foreach ($candidateForm in $allForms) {
+            $candidateForms = @($requiredForms)
+            $candidateForms[$position] = $candidateForm
+            $rowLabel = "position-$position-$($formRows[$position].Type)-$candidateForm"
+            $candidateManifest = Join-Path $freshCheckout "form-matrix-$position-$candidateForm.json"
+            Write-FormMatrixManifest -Forms $candidateForms -Destination $candidateManifest
+
+            $matrixCheck = Invoke-LocalTool -Label "local-manifest form matrix $rowLabel check" -Arguments @('check', $consumerProject, '--baseline', $candidateManifest, '--format', 'json', '--severity', 'all', '--accept', 'KMLOG001', '--accept', 'KMLOG002', '--no-telemetry')
+            $matrixDiff = Invoke-LocalTool -Label "local-manifest form matrix $rowLabel symmetric diff" -Arguments @('diff', $candidateManifest, $candidateManifest, '--format', 'json', '--severity', 'all', '--no-telemetry')
+            if ($candidateForm -eq $formRows[$position].Expected) {
+                Assert-That ($matrixCheck.ExitCode -eq 0) "installed form matrix $rowLabel check must accept the reader-computed form"
+                Assert-That ($matrixDiff.ExitCode -eq 0) "installed form matrix $rowLabel diff must accept the reader-computed form"
+                $checkEnvelope = $matrixCheck.Output | ConvertFrom-Json
+                $diffEnvelope = $matrixDiff.Output | ConvertFrom-Json
+                Assert-That ($checkEnvelope.coverageComplete -eq $true -and $diffEnvelope.coverageComplete -eq $true) "installed form matrix $rowLabel must report complete coverage"
+            }
+            else {
+                Assert-AnalysisErrorEnvelope -Result $matrixCheck -Label "installed form matrix $rowLabel check" -ForbiddenPath $freshCheckout
+                Assert-AnalysisErrorEnvelope -Result $matrixDiff -Label "installed form matrix $rowLabel symmetric diff" -ForbiddenPath $freshCheckout
+            }
+        }
+    }
+
+    $comparisonErrorManifest = Join-Path $freshCheckout 'comparison-analysis-error.json'
+    $comparisonError = Get-Content -Raw -LiteralPath $baseline | ConvertFrom-Json
+    $comparisonError.analysisIssues = @([pscustomobject]@{
+            projectKey = [string]$comparisonError.projects[0].key
+            code = 'KMLOGP001'
+            severity = 'error'
+            message = 'Synthetic comparison analysis error.'
+            declarationKey = ''
+            sources = @()
+        })
+    $comparisonError | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $comparisonErrorManifest -Encoding utf8NoBOM
+    $comparisonErrorCheck = Invoke-LocalTool -Label 'local-manifest comparison analysis-error check' -Arguments @('check', $consumerProject, '--baseline', $comparisonErrorManifest, '--format', 'json', '--severity', 'all', '--no-telemetry')
+    Assert-AnalysisErrorEnvelope -Result $comparisonErrorCheck -Label 'installed comparison analysis-error check' -ForbiddenPath $freshCheckout
+    Assert-That ($comparisonErrorCheck.Output -match 'KMLOGP001: Synthetic comparison analysis error') 'installed check must exercise the comparison-originated analysis error'
+    $comparisonErrorDiff = Invoke-LocalTool -Label 'local-manifest comparison analysis-error diff' -Arguments @('diff', $baseline, $comparisonErrorManifest, '--format', 'json', '--severity', 'all', '--no-telemetry')
+    Assert-AnalysisErrorEnvelope -Result $comparisonErrorDiff -Label 'installed comparison analysis-error diff' -ForbiddenPath $freshCheckout
+    Assert-That ($comparisonErrorDiff.Output -match 'KMLOGP001: Synthetic comparison analysis error') 'installed diff must exercise the comparison-originated analysis error'
 
     $reviewerBaseline = Join-Path $freshCheckout 'tampered-reviewer-exact.json'
     $reviewerText = Invoke-LocalTool -Label 'local-manifest reviewer-exact text check' -Arguments @('check', $consumerProject, '--baseline', $reviewerBaseline, '--severity', 'all', '--no-telemetry')
@@ -298,7 +351,8 @@ try {
     Assert-That ($reviewerText.Output -notmatch '(?m)^\s*at KeelMatrix\.') 'the reviewer-exact text check must not expose a stack trace'
 
     $derivedEvent = @($capturedManifest.events | Where-Object method -eq 'DerivedException')
-    Assert-That ($derivedEvent.Count -eq 1 -and (@($derivedEvent[0].parameterForms) -join ',') -eq 'ILogger,Exception' -and ([string]$derivedEvent[0].identity).Contains(':Exception:DerivedProblem', [StringComparison]::Ordinal)) 'installed capture must preserve the canonical non-suffix derived-exception form'
+    Assert-That ($derivedEvent.Count -eq 1 -and (@($derivedEvent[0].parameterForms) -join ',') -eq 'ILogger,None' -and ([string]$derivedEvent[0].identity).Contains(':None:DerivedProblem', [StringComparison]::Ordinal)) 'installed capture must support a non-suffix derived exception while recording its declared type with form None'
+    Assert-That (@($derivedEvent[0].placeholders).Count -eq 0) 'installed capture must keep a derived exception out of the message placeholder list'
     $exactExceptionEvent = @($capturedManifest.events | Where-Object method -eq 'ExactException')
     Assert-That ($exactExceptionEvent.Count -eq 1 -and (@($exactExceptionEvent[0].parameterForms) -join ',') -eq 'ILogger,Exception' -and ([string]$exactExceptionEvent[0].identity).Contains(':Exception:System.Exception', [StringComparison]::Ordinal)) 'installed capture must preserve the canonical exact System.Exception form'
     $ordinaryCustomEvent = @($capturedManifest.events | Where-Object method -eq 'OrdinaryCustom')

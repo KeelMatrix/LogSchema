@@ -16,7 +16,8 @@ public sealed class CommandRunnerTests
         Assert.Contains("logschema capture", output.ToString(), StringComparison.Ordinal);
         Assert.Contains("--no-telemetry", output.ToString(), StringComparison.Ordinal);
         Assert.Contains("contains no telemetry client", output.ToString(), StringComparison.Ordinal);
-        Assert.Contains("parameterForms must equal that parsed vector exactly", output.ToString(), StringComparison.Ordinal);
+        Assert.Contains("Forms are recomputed from declared types", output.ToString(), StringComparison.Ordinal);
+        Assert.Contains("Embedded forms and parameterForms must equal that vector", output.ToString(), StringComparison.Ordinal);
         Assert.Contains("incomplete coverage and no findings", output.ToString(), StringComparison.Ordinal);
         Assert.Empty(errors.ToString());
     }
@@ -209,9 +210,9 @@ public sealed class CommandRunnerTests
     }
 
     [Theory]
-    [InlineData("Event", 1, "Exception")]
-    [InlineData("DerivedException", 1, "None")]
-    public async Task SymmetricForgedParameterFormsFailClosed(string method, int parameterIndex, string forgedForm)
+    [InlineData("Event", 1, "string")]
+    [InlineData("DerivedException", 1, "DerivedProblem")]
+    public async Task SymmetricCoordinatedParameterFormForgeriesFailClosed(string method, int parameterIndex, string parameterType)
     {
         var root = Directory.CreateTempSubdirectory("logschema-symmetric-form-");
         var capturedPath = Path.Combine(root.FullName, "captured.json");
@@ -221,7 +222,8 @@ public sealed class CommandRunnerTests
             await CaptureConsumerFixtureAsync(capturedPath);
             var manifest = JsonNode.Parse(await File.ReadAllTextAsync(capturedPath))!;
             var @event = manifest["events"]!.AsArray().Single(item => item!["method"]!.GetValue<string>() == method)!;
-            @event["parameterForms"]![parameterIndex] = forgedForm;
+            @event["identity"] = @event["identity"]!.GetValue<string>().Replace(":None:" + parameterType, ":Exception:" + parameterType, StringComparison.Ordinal);
+            @event["parameterForms"]![parameterIndex] = "Exception";
             await File.WriteAllTextAsync(forgedPath, manifest.ToJsonString());
 
             using var output = new StringWriter();
@@ -237,7 +239,7 @@ public sealed class CommandRunnerTests
     }
 
     [Fact]
-    public async Task ComparisonParameterFormErrorsReportIncompleteCoverage()
+    public async Task ComparisonAnalysisErrorsReportIncompleteCoverage()
     {
         var root = Directory.CreateTempSubdirectory("logschema-comparison-form-");
         var capturedPath = Path.Combine(root.FullName, "captured.json");
@@ -246,9 +248,16 @@ public sealed class CommandRunnerTests
         {
             await CaptureConsumerFixtureAsync(capturedPath);
             var manifest = JsonNode.Parse(await File.ReadAllTextAsync(capturedPath))!;
-            var @event = manifest["events"]!.AsArray().Single(item => item!["method"]!.GetValue<string>() == "DerivedException")!;
-            @event["identity"] = @event["identity"]!.GetValue<string>().Replace(":Exception:DerivedProblem", ":None:DerivedProblem", StringComparison.Ordinal);
-            @event["parameterForms"]![1] = "None";
+            var projectKey = manifest["projects"]![0]!["key"]!.GetValue<string>();
+            manifest["analysisIssues"] = new JsonArray(new JsonObject
+            {
+                ["projectKey"] = projectKey,
+                ["code"] = "KMLOGP001",
+                ["severity"] = "error",
+                ["message"] = "Synthetic comparison analysis error.",
+                ["declarationKey"] = string.Empty,
+                ["sources"] = new JsonArray()
+            });
             await File.WriteAllTextAsync(forgedPath, manifest.ToJsonString());
             _ = await ManifestJson.ReadAsync(forgedPath, CancellationToken.None);
 
@@ -263,7 +272,7 @@ public sealed class CommandRunnerTests
                 var exitCode = await CommandRunner.RunAsync(arguments, output, errors);
 
                 AssertAnalysisErrorEnvelope(exitCode, output.ToString(), errors.ToString(), root.FullName);
-                Assert.Contains("compared canonical method identity", output.ToString(), StringComparison.Ordinal);
+                Assert.Contains("KMLOGP001: Synthetic comparison analysis error.", output.ToString(), StringComparison.Ordinal);
             }
         }
         finally

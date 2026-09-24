@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using KeelMatrix.LogSchema;
 
@@ -6,6 +7,17 @@ namespace KeelMatrix.LogSchema.Tests;
 
 public sealed class ManifestJsonTests
 {
+    [Theory]
+    [InlineData("Microsoft.Extensions.Logging.ILogger", "ILogger")]
+    [InlineData("Microsoft.Extensions.Logging.ILogger<P.Category>", "ILogger")]
+    [InlineData("Microsoft.Extensions.Logging.LogLevel", "LogLevel")]
+    [InlineData("System.Exception", "Exception")]
+    [InlineData("P.DerivedProblem", "None")]
+    [InlineData("P.OrdinaryProblem", "None")]
+    [InlineData("string", "None")]
+    public void RequiredParameterFormIsAFunctionOfCanonicalDeclaredType(string type, string expected) =>
+        Assert.Equal(expected, ManifestJson.GetRequiredParameterForm(type));
+
     [Fact]
     public async Task SerializationIsCanonicalUtf8AndPathIndependent()
     {
@@ -347,7 +359,7 @@ public sealed class ManifestJsonTests
           "projects": [{ "key": "P|net8.0", "name": "P", "assembly": "P", "targetFramework": "net8.0" }],
           "events": [{
             "projectKey": "P|net8.0",
-            "identity": "P.Logging.Event`0(None:ILogger:Microsoft.Extensions.Logging.ILogger,None:LogLevel:Microsoft.Extensions.Logging.LogLevel,None:Exception:System.Exception,None:Exception:P.DerivedProblem,None:None:P.OrdinaryProblem,None:None:string)",
+            "identity": "P.Logging.Event`0(None:ILogger:Microsoft.Extensions.Logging.ILogger,None:LogLevel:Microsoft.Extensions.Logging.LogLevel,None:Exception:System.Exception,None:None:P.DerivedProblem,None:None:P.OrdinaryProblem,None:None:string)",
             "containingType": "P.Logging",
             "method": "Event",
             "genericArity": 0,
@@ -357,7 +369,7 @@ public sealed class ManifestJsonTests
             "level": "Dynamic",
             "message": "Event",
             "placeholders": [],
-            "parameterForms": ["ILogger", "LogLevel", "Exception", "Exception", "None", "None"],
+            "parameterForms": ["ILogger", "LogLevel", "Exception", "None", "None", "None"],
             "source": { "file": "Logging.cs", "line": 1, "kind": "source" }
           }],
           "unsupported": [],
@@ -366,7 +378,7 @@ public sealed class ManifestJsonTests
           "workspaceDiagnosticKinds": []
         }
         """)!;
-        var expectedForms = new[] { "ILogger", "LogLevel", "Exception", "Exception", "None", "None" };
+        var expectedForms = new[] { "ILogger", "LogLevel", "Exception", "None", "None", "None" };
         var allForms = new[] { "None", "Exception", "ILogger", "LogLevel" };
 
         try
@@ -397,10 +409,78 @@ public sealed class ManifestJsonTests
         }
     }
 
+    [Fact]
+    public async Task ReaderRecomputesFormsForEveryAcceptedGeneratedManifest()
+    {
+        const int cases = 64;
+        var random = new Random(0x4C534348);
+        var root = Directory.CreateTempSubdirectory("logschema-form-fuzz-");
+        var validPath = Path.Combine(root.FullName, "valid.json");
+        var forgedPath = Path.Combine(root.FullName, "forged.json");
+        var embeddedPath = Path.Combine(root.FullName, "embedded.json");
+        var redundantPath = Path.Combine(root.FullName, "redundant.json");
+        var typePool = new[]
+        {
+            "Microsoft.Extensions.Logging.ILogger",
+            "Microsoft.Extensions.Logging.ILogger<P.OrdinaryProblem>",
+            "Microsoft.Extensions.Logging.LogLevel",
+            "System.Exception",
+            "P.DerivedProblem",
+            "P.OrdinaryProblem",
+            "string"
+        };
+        var allForms = new[] { "None", "Exception", "ILogger", "LogLevel" };
+
+        try
+        {
+            for (var iteration = 0; iteration < cases; iteration++)
+            {
+                var parameterCount = random.Next(1, 9);
+                var types = Enumerable.Range(0, parameterCount).Select(_ => typePool[random.Next(typePool.Length)]).ToArray();
+                types[random.Next(parameterCount)] = random.Next(2) == 0
+                    ? "Microsoft.Extensions.Logging.ILogger"
+                    : "Microsoft.Extensions.Logging.ILogger<P.OrdinaryProblem>";
+                var requiredForms = types.Select(ManifestJson.GetRequiredParameterForm).ToArray();
+                var method = "Generated" + iteration.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                var valid = FormManifest(method, types, requiredForms, requiredForms);
+
+                await ManifestJson.WriteAsync(valid, validPath, CancellationToken.None);
+                var accepted = await ManifestJson.ReadAsync(validPath, CancellationToken.None);
+                var acceptedEvent = Assert.Single(accepted.Events);
+                Assert.Equal(requiredForms, acceptedEvent.ParameterForms);
+                Assert.Equal(requiredForms, types.Select(ManifestJson.GetRequiredParameterForm));
+                Assert.Equal(Assert.Single(valid.Events).Identity, acceptedEvent.Identity);
+
+                for (var position = 0; position < parameterCount; position++)
+                {
+                    var suppliedForms = requiredForms.ToArray();
+                    suppliedForms[position] = allForms.First(form => form != requiredForms[position]);
+
+                    var coordinatedForgery = FormManifest(method, types, suppliedForms, suppliedForms);
+                    await File.WriteAllTextAsync(forgedPath, JsonSerializer.Serialize(coordinatedForgery));
+                    await Assert.ThrowsAsync<ManifestReadException>(() => ManifestJson.ReadAsync(forgedPath, CancellationToken.None));
+
+                    var embeddedForgery = FormManifest(method, types, suppliedForms, requiredForms);
+                    await File.WriteAllTextAsync(embeddedPath, JsonSerializer.Serialize(embeddedForgery));
+                    await Assert.ThrowsAsync<ManifestReadException>(() => ManifestJson.ReadAsync(embeddedPath, CancellationToken.None));
+
+                    var redundantForgery = FormManifest(method, types, requiredForms, suppliedForms);
+                    await File.WriteAllTextAsync(redundantPath, JsonSerializer.Serialize(redundantForgery));
+                    await Assert.ThrowsAsync<ManifestReadException>(() => ManifestJson.ReadAsync(redundantPath, CancellationToken.None));
+                }
+            }
+        }
+        finally
+        {
+            root.Delete(true);
+        }
+    }
+
     [Theory]
     [InlineData("P.Logging.Event`0(None:None:Microsoft.Extensions.Logging.ILogger)", new[] { "None" })]
     [InlineData("P.Logging.Event`0(None:ILogger:Microsoft.Extensions.Logging.ILogger,None:None:Microsoft.Extensions.Logging.LogLevel)", new[] { "ILogger", "None" })]
     [InlineData("P.Logging.Event`0(None:ILogger:Microsoft.Extensions.Logging.ILogger,None:None:System.Exception)", new[] { "ILogger", "None" })]
+    [InlineData("P.Logging.Event`0(None:ILogger:Microsoft.Extensions.Logging.ILogger,None:Exception:P.DerivedProblem)", new[] { "ILogger", "Exception" })]
     [InlineData("P.Logging.Event`0(None:ILogger:Microsoft.Extensions.Logging.ILogger,None:Exception:string)", new[] { "ILogger", "Exception" })]
     [InlineData("P.Logging.Event`0(None:ILogger:Microsoft.Extensions.Logging.ILogger,None:ILogger:P.OrdinaryProblem)", new[] { "ILogger", "ILogger" })]
     [InlineData("P.Logging.Event`0(None:ILogger:Microsoft.Extensions.Logging.ILogger,None:LogLevel:P.OrdinaryProblem)", new[] { "ILogger", "LogLevel" })]
@@ -425,6 +505,19 @@ public sealed class ManifestJsonTests
         {
             root.Delete(true);
         }
+    }
+
+    private static ManifestDocument FormManifest(string method, string[] types, string[] embeddedForms, string[] parameterForms)
+    {
+        var identity = "P.Logging." + method + "`0(" + string.Join(",", types.Select((type, index) => "None:" + embeddedForms[index] + ":" + type)) + ")";
+        return new ManifestDocument(
+            1,
+            [new ProjectIdentity("P|net8.0", "P", "P", "net8.0")],
+            [new EventContract("P|net8.0", identity, "P.Logging", method, 0, Enumerable.Repeat("None", types.Length).ToArray(), 1, method, "Information", "Event", [], parameterForms, new SourceLocation("Logging.cs", 1, "source"))],
+            [],
+            [],
+            [],
+            []);
     }
 
     [Fact]

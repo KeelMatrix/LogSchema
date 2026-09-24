@@ -473,7 +473,7 @@ internal sealed class LogSchemaExtractor
 
     private static bool IsLogger(ITypeSymbol type) => type.Name == "ILogger" && type.ContainingNamespace.ToDisplayString() == "Microsoft.Extensions.Logging";
     private static bool IsLogLevel(ITypeSymbol type) => type.Name == "LogLevel" && type.ContainingNamespace.ToDisplayString() == "Microsoft.Extensions.Logging";
-    private static string GetParameterForm(ITypeSymbol type) => IsLogger(type) ? "ILogger" : IsException(type) ? "Exception" : IsLogLevel(type) ? "LogLevel" : "None";
+    private static string GetParameterForm(ITypeSymbol type) => ManifestJson.GetRequiredParameterForm(type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat).Replace("global::", string.Empty, StringComparison.Ordinal));
     private static bool IsException(ITypeSymbol type)
     {
         for (var current = type; current is not null; current = (current as INamedTypeSymbol)?.BaseType)

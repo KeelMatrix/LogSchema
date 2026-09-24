@@ -18,7 +18,7 @@ public static partial class Logging
 }
 
 [SuppressMessage("Design", "CA1050:Declare types in namespaces", Justification = "The global type keeps the canonical identity fixture stable.")]
-[SuppressMessage("Naming", "CA1710:Identifiers should have correct suffix", Justification = "A non-Exception suffix proves semantic derived-exception classification.")]
+[SuppressMessage("Naming", "CA1710:Identifiers should have correct suffix", Justification = "A non-Exception suffix proves derived-exception support independently of type-name suffixes.")]
 public sealed class DerivedProblem : Exception
 {
 }
