@@ -1,6 +1,6 @@
 # Compatibility rules
 
-This file is the single source of truth for v1 change classification and diagnostic codes. A comparison matches events by canonical project key and method identity. A method identity change therefore appears as one removed event and one added event; removal is the breaking side of that change.
+This file is the single source of truth for v1 change classification and diagnostic codes. A comparison matches events by canonical project key and the form-neutral declared method signature (containing type, method, generic arity, ref kinds, and canonical types). A declared signature change therefore appears as one removed event and one added event; removal is the breaking side of that change. A semantic-form change for an otherwise identical signature is an analysis error because comparison coverage is no longer trustworthy.
 
 Structured identity fields use exact ordinal semantics: comparisons are case-sensitive and culture-invariant. This applies to canonical project and method identities, EventName, and structured placeholder names and order. A case-only placeholder change is therefore a structured rename (`KMLOG102`), not prose-only drift. `KMLOG301` applies only when the structured shape is unchanged under these ordinal comparisons.
 
@@ -23,7 +23,7 @@ Structured identity fields use exact ordinal semantics: comparisons are case-sen
 
 Analysis diagnostics make an extracted or compared contract untrustworthy. An error returns exit code 3. Warnings remain in a captured manifest for review; comparison rejects any manifest with unsupported declarations through `KMLOGP007`.
 
-Manifest read validation runs before comparison. Malformed or non-canonical method identities, any additive, subtractive, or substituted difference between a parsed identity and its redundant containing type, method, generic arity, parameter count, ref kinds, or positional parameter forms, and unknown ref-kind or parameter-form vocabulary are analysis errors. Text output uses the `ANALYSIS ERROR` envelope; JSON places the message in `analysisErrors`, leaves `findings` empty, reports incomplete coverage, and returns exit code 3.
+Manifest read validation runs before comparison. Each canonical identity parameter embeds its semantic form beside its ref kind and canonical type. Malformed or non-canonical method identities, any additive, subtractive, or substituted difference between a parsed identity and its redundant containing type, method, generic arity, parameter count, ref kinds, or positional parameter forms, and unknown ref-kind or parameter-form vocabulary are analysis errors. Comparison also fails if two valid manifests assign different embedded semantic forms to the same form-neutral declared signature. Text output uses the `ANALYSIS ERROR` envelope; JSON places the message in `analysisErrors`, leaves `findings` empty, sets `coverageComplete` to `false`, and returns exit code 3 for both read-time and comparison-time analysis errors.
 
 | Code | Condition | Severity and result |
 | --- | --- | --- |

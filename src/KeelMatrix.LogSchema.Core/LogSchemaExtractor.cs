@@ -350,7 +350,7 @@ internal sealed class LogSchemaExtractor
             level,
             message,
             placeholders,
-            method.Parameters.Select(parameter => IsLogger(parameter.Type) ? "ILogger" : IsException(parameter.Type) ? "Exception" : IsLogLevel(parameter.Type) ? "LogLevel" : "None").ToArray(),
+            method.Parameters.Select(parameter => GetParameterForm(parameter.Type)).ToArray(),
             source);
         return true;
     }
@@ -445,7 +445,7 @@ internal sealed class LogSchemaExtractor
         return true;
     }
 
-    private static string GetDeclarationKey(IMethodSymbol method) => method.ContainingType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) + "." + method.Name + "`" + method.Arity.ToString(CultureInfo.InvariantCulture) + "(" + string.Join(",", method.Parameters.Select(parameter => $"{parameter.RefKind}:{parameter.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)}")) + ")";
+    private static string GetDeclarationKey(IMethodSymbol method) => method.ContainingType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) + "." + method.Name + "`" + method.Arity.ToString(CultureInfo.InvariantCulture) + "(" + string.Join(",", method.Parameters.Select(parameter => $"{parameter.RefKind}:{GetParameterForm(parameter.Type)}:{parameter.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)}")) + ")";
 
     private static string EnumName(TypedConstant argument) => Convert.ToInt32(argument.Value, CultureInfo.InvariantCulture) switch
     {
@@ -473,6 +473,7 @@ internal sealed class LogSchemaExtractor
 
     private static bool IsLogger(ITypeSymbol type) => type.Name == "ILogger" && type.ContainingNamespace.ToDisplayString() == "Microsoft.Extensions.Logging";
     private static bool IsLogLevel(ITypeSymbol type) => type.Name == "LogLevel" && type.ContainingNamespace.ToDisplayString() == "Microsoft.Extensions.Logging";
+    private static string GetParameterForm(ITypeSymbol type) => IsLogger(type) ? "ILogger" : IsException(type) ? "Exception" : IsLogLevel(type) ? "LogLevel" : "None";
     private static bool IsException(ITypeSymbol type)
     {
         for (var current = type; current is not null; current = (current as INamedTypeSymbol)?.BaseType)

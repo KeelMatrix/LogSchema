@@ -27,6 +27,12 @@ public sealed class ExtractorTests
             Assert.Equal(1001, events["Processed"].GetProperty("eventId").GetInt32());
             Assert.Equal("Dynamic", events["DynamicLevel"].GetProperty("level").GetString());
             Assert.Equal("None", events["FixedNone"].GetProperty("level").GetString());
+            Assert.Equal("ILogger,Exception", string.Join(',', events["DerivedException"].GetProperty("parameterForms").EnumerateArray().Select(item => item.GetString())));
+            Assert.Contains("None:Exception:DerivedProblem", events["DerivedException"].GetProperty("identity").GetString(), StringComparison.Ordinal);
+            Assert.Equal("ILogger,Exception", string.Join(',', events["ExactException"].GetProperty("parameterForms").EnumerateArray().Select(item => item.GetString())));
+            Assert.Contains("None:Exception:System.Exception", events["ExactException"].GetProperty("identity").GetString(), StringComparison.Ordinal);
+            Assert.Equal("ILogger,None", string.Join(',', events["OrdinaryCustom"].GetProperty("parameterForms").EnumerateArray().Select(item => item.GetString())));
+            Assert.Contains("None:None:OrdinaryProblem", events["OrdinaryCustom"].GetProperty("identity").GetString(), StringComparison.Ordinal);
         }
         finally
         {

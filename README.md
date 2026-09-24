@@ -75,7 +75,7 @@ The complete rule matrix and stable diagnostic codes are maintained in [COMPATIB
 | LogLevel changed | WARNING | no; use `--severity warning` |
 | Template prose changed with the same structured shape | INFO | no |
 
-Structured identity fields are compared with exact ordinal semantics: redundant identity arrays, including positional parameter forms, require exact equality and reject additive values as analysis errors. Case-only changes to placeholder names are structured renames (`KMLOG102`), while `KMLOG301` is reserved for prose changes whose structured shape is unchanged under ordinal comparison.
+Structured identity fields are compared with exact ordinal semantics. Every canonical parameter identity embeds its semantic form (`None`, `Exception`, `ILogger`, or `LogLevel`) beside its ref kind and canonical type; the redundant `parameterForms` vector must equal that parsed evidence exactly. This preserves exact and derived exceptions, distinguishes ordinary custom types, and rejects symmetric as well as one-sided or additive form contradictions as analysis errors. Case-only changes to placeholder names are structured renames (`KMLOG102`), while `KMLOG301` is reserved for prose changes whose structured shape is unchanged under ordinal comparison.
 
 Intentional changes can be accepted explicitly with repeated `--accept <diagnostic-code>`. Acceptance affects only the current comparison; it never rewrites a baseline.
 
@@ -109,13 +109,15 @@ A project-load failure is always code 3 and cannot produce a clean result. JSON 
   "findings": [],
   "manifestPath": null,
   "eventCount": 84,
-  "unsupportedCount": 0
+  "unsupportedCount": 0,
+  "unsupported": [],
+  "coverageComplete": true
 }
 ```
 
 ## Manifest and determinism
 
-Manifest schema version 1 is documented in [MANIFEST.md](MANIFEST.md). It is UTF-8 without a BOM, uses invariant canonical values, sorts every list with ordinal ordering, normalizes paths to project-relative `/` separators, and contains no absolute machine paths. Parsing is bounded to 4 MiB and depth 32 and rejects malformed input, a future schema version, and event identities that contradict their containing type, method, generic arity, parameter count, ref kinds, or parameter forms.
+Manifest schema version 1 is documented in [MANIFEST.md](MANIFEST.md). It is UTF-8 without a BOM, uses invariant canonical values, sorts every list with ordinal ordering, normalizes paths to project-relative `/` separators, and contains no absolute machine paths. Parsing is bounded to 4 MiB and depth 32 and rejects malformed input, a future schema version, and event identities that contradict their containing type, method, generic arity, parameter count, ref kinds, or embedded semantic forms. Every read-time or comparison-time analysis error returns exit 3 with no findings and `coverageComplete: false`.
 
 ## Diagnostics
 

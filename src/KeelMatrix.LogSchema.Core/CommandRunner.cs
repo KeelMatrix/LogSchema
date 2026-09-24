@@ -76,7 +76,7 @@ internal sealed class CommandRunner
             await ManifestJson.WriteAsync(manifest, parsed.OutputPath!, cancellationToken);
         }
 
-        var envelope = new CommandEnvelope(Array.Empty<string>(), errors, Array.Empty<CompatibilityFinding>(), errors.Length == 0 ? Path.GetFileName(parsed.OutputPath) : null, manifest.Events.Count, manifest.Unsupported.Count, manifest.Unsupported, manifest.Unsupported.Count == 0);
+        var envelope = new CommandEnvelope(Array.Empty<string>(), errors, Array.Empty<CompatibilityFinding>(), errors.Length == 0 ? Path.GetFileName(parsed.OutputPath) : null, manifest.Events.Count, manifest.Unsupported.Count, manifest.Unsupported, errors.Length == 0 && manifest.Unsupported.Count == 0);
         await WriteEnvelopeAsync(parsed, envelope, stdout, stderr, errors.Length > 0 ? 3 : 0);
         return errors.Length > 0 ? 3 : 0;
     }
@@ -87,7 +87,7 @@ internal sealed class CommandRunner
         var baseline = await ManifestJson.ReadAsync(parsed.BaselinePath!, cancellationToken);
         var report = ComparisonEngine.Compare(baseline, current, parsed.Gate, parsed.AcceptedCodes, rejectEmptyEventSets: true);
         var unsupported = baseline.Unsupported.Concat(current.Unsupported).Distinct().ToArray();
-        var envelope = new CommandEnvelope(Array.Empty<string>(), report.AnalysisErrors, report.Findings, null, current.Events.Count, unsupported.Length, unsupported, unsupported.Length == 0);
+        var envelope = new CommandEnvelope(Array.Empty<string>(), report.AnalysisErrors, report.Findings, null, current.Events.Count, unsupported.Length, unsupported, report.AnalysisErrors.Count == 0 && unsupported.Length == 0);
         var exitCode = report.AnalysisErrors.Count > 0 ? 3 : report.HasGatedFindings(parsed.Gate) ? 1 : 0;
         await WriteEnvelopeAsync(parsed, envelope, stdout, stderr, exitCode);
         return exitCode;
@@ -99,7 +99,7 @@ internal sealed class CommandRunner
         var newManifest = await ManifestJson.ReadAsync(parsed.Positionals[1], cancellationToken);
         var report = ComparisonEngine.Compare(oldManifest, newManifest, parsed.Gate, parsed.AcceptedCodes);
         var unsupported = oldManifest.Unsupported.Concat(newManifest.Unsupported).Distinct().ToArray();
-        var envelope = new CommandEnvelope(Array.Empty<string>(), report.AnalysisErrors, report.Findings, null, newManifest.Events.Count, unsupported.Length, unsupported, unsupported.Length == 0);
+        var envelope = new CommandEnvelope(Array.Empty<string>(), report.AnalysisErrors, report.Findings, null, newManifest.Events.Count, unsupported.Length, unsupported, report.AnalysisErrors.Count == 0 && unsupported.Length == 0);
         var exitCode = report.AnalysisErrors.Count > 0 ? 3 : report.HasGatedFindings(parsed.Gate) ? 1 : 0;
         await WriteEnvelopeAsync(parsed, envelope, stdout, stderr, exitCode);
         return exitCode;
@@ -312,7 +312,8 @@ Compatibility summary:
   WARNING  LogLevel changes (use --severity warning to gate).
   INFO     Event/placeholder additions and prose-only template changes with unchanged structured shape.
   Structured identity fields use exact ordinal comparison; case-only placeholder renames are KMLOG102.
-  Redundant identity fields and positional parameter forms require exact equality; additive values fail analysis with exit 3.
+  Each identity parameter embeds its semantic form; parameterForms must equal that parsed vector exactly.
+  Read-time and comparison-time form contradictions return 3 with incomplete coverage and no findings.
   KMLOGP006 means no supported [LoggerMessage] declarations were found; capture/check return 3 and
   capture does not write a baseline. diff remains a pure manifest comparison.
 """;

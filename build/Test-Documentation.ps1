@@ -43,12 +43,15 @@ foreach ($number in 1..7) {
     Assert-That ($diagnostics -match [regex]::Escape($code)) "the diagnostic reference must document $code"
 }
 Assert-That ($diagnostics -match 'additive, subtractive, or substituted difference' -and $diagnostics -match 'analysisErrors') 'the diagnostic reference must document canonical identity validation failure behavior'
+Assert-That ($diagnostics -match 'comparison-time analysis errors' -and $diagnostics -match 'coverageComplete.*false') 'the diagnostic reference must document the comparison analysis-error coverage envelope'
 
 $privacy = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot 'PRIVACY.md')
 Assert-That ($privacy -match 'contains no telemetry client' -and $privacy -match 'makes no network requests') 'privacy claims must match the shipping implementation'
 $manifest = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot 'MANIFEST.md')
 Assert-That ($manifest -match 'contains no telemetry client' -and $manifest -match '10\.0\.401') 'manifest privacy and SDK claims must match the shipping implementation'
-Assert-That ($manifest -match 'parameterRefKinds.*same count and values' -and $manifest -match 'parameterForms.*positional' -and $manifest -match 'additive as well as subtractive') 'the manifest contract must document exact canonical identity tuple validation'
+Assert-That ($manifest -match '<ref-kind>:<semantic-form>:<canonical-type>' -and $manifest -match 'parameterForms.*parsed ref-kind or semantic-form vector' -and $manifest -match 'additive, subtractive, or substituted') 'the manifest contract must document self-verifying canonical parameter forms'
+Assert-That ($manifest -match 'exact `System\.Exception`' -and $manifest -match 'non-suffix derived exception' -and $manifest -match 'ordinary custom types') 'the manifest contract must document the complete semantic-form decision table'
+Assert-That ($manifest -match 'comparison-time analysis error' -and $manifest -match 'coverageComplete: false') 'the manifest contract must document the comparison analysis-error envelope'
 $dependencies = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot 'docs/DEPENDENCIES.md')
 Assert-That ($dependencies -match 'nuspec intentionally exposes no external package dependencies' -and $dependencies -match '10\.0\.401') 'dependency documentation must describe the bundled shipping graph and verified SDK'
 

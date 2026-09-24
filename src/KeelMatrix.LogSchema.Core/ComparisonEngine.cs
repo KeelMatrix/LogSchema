@@ -95,7 +95,7 @@ internal static class ComparisonEngine
         }
 
         var distinctAnalysisErrors = analysisErrors.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
-        return new ComparisonReport(normalized, distinctAnalysisErrors);
+        return new ComparisonReport(distinctAnalysisErrors.Length == 0 ? normalized : Array.Empty<CompatibilityFinding>(), distinctAnalysisErrors);
     }
 
     private static void CompareEvent(EventContract oldEvent, EventContract newEvent, List<CompatibilityFinding> findings)
@@ -147,7 +147,7 @@ internal static class ComparisonEngine
     }
 
     private static CompatibilityFinding Find(string code, FindingSeverity severity, EventContract @event, string field, string? oldValue, string? newValue, string message) => new(code, severity, @event.ProjectKey, @event.Identity, @event.EventName, field, oldValue, newValue, message);
-    private static string EventKey(EventContract @event) => @event.ProjectKey + "\u001f" + @event.Identity;
+    private static string EventKey(EventContract @event) => @event.ProjectKey + "\u001f" + ManifestJson.GetComparisonIdentity(@event.Identity);
     private static string Display(EventContract @event) => string.IsNullOrWhiteSpace(@event.EventName) ? @event.Method : @event.EventName;
 
     private static List<string> RetainedOccurrences(IReadOnlyList<string> names, IReadOnlyList<string> otherNames)

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using KeelMatrix.LogSchema;
 
 namespace KeelMatrix.LogSchema.Tests;
@@ -15,7 +16,8 @@ public sealed class CommandRunnerTests
         Assert.Contains("logschema capture", output.ToString(), StringComparison.Ordinal);
         Assert.Contains("--no-telemetry", output.ToString(), StringComparison.Ordinal);
         Assert.Contains("contains no telemetry client", output.ToString(), StringComparison.Ordinal);
-        Assert.Contains("positional parameter forms require exact equality", output.ToString(), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("parameterForms must equal that parsed vector exactly", output.ToString(), StringComparison.Ordinal);
+        Assert.Contains("incomplete coverage and no findings", output.ToString(), StringComparison.Ordinal);
         Assert.Empty(errors.ToString());
     }
 
@@ -204,6 +206,92 @@ public sealed class CommandRunnerTests
         Assert.Empty(errors.ToString());
         Assert.Contains("analysisErrors", output.ToString(), StringComparison.Ordinal);
         Assert.DoesNotContain("at KeelMatrix", output.ToString(), StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("Event", 1, "Exception")]
+    [InlineData("DerivedException", 1, "None")]
+    public async Task SymmetricForgedParameterFormsFailClosed(string method, int parameterIndex, string forgedForm)
+    {
+        var root = Directory.CreateTempSubdirectory("logschema-symmetric-form-");
+        var capturedPath = Path.Combine(root.FullName, "captured.json");
+        var forgedPath = Path.Combine(root.FullName, "forged.json");
+        try
+        {
+            await CaptureConsumerFixtureAsync(capturedPath);
+            var manifest = JsonNode.Parse(await File.ReadAllTextAsync(capturedPath))!;
+            var @event = manifest["events"]!.AsArray().Single(item => item!["method"]!.GetValue<string>() == method)!;
+            @event["parameterForms"]![parameterIndex] = forgedForm;
+            await File.WriteAllTextAsync(forgedPath, manifest.ToJsonString());
+
+            using var output = new StringWriter();
+            using var errors = new StringWriter();
+            var exitCode = await CommandRunner.RunAsync(["diff", forgedPath, forgedPath, "--format", "json", "--severity", "all", "--no-telemetry"], output, errors);
+
+            AssertAnalysisErrorEnvelope(exitCode, output.ToString(), errors.ToString(), root.FullName);
+        }
+        finally
+        {
+            root.Delete(true);
+        }
+    }
+
+    [Fact]
+    public async Task ComparisonParameterFormErrorsReportIncompleteCoverage()
+    {
+        var root = Directory.CreateTempSubdirectory("logschema-comparison-form-");
+        var capturedPath = Path.Combine(root.FullName, "captured.json");
+        var forgedPath = Path.Combine(root.FullName, "forged.json");
+        try
+        {
+            await CaptureConsumerFixtureAsync(capturedPath);
+            var manifest = JsonNode.Parse(await File.ReadAllTextAsync(capturedPath))!;
+            var @event = manifest["events"]!.AsArray().Single(item => item!["method"]!.GetValue<string>() == "DerivedException")!;
+            @event["identity"] = @event["identity"]!.GetValue<string>().Replace(":Exception:DerivedProblem", ":None:DerivedProblem", StringComparison.Ordinal);
+            @event["parameterForms"]![1] = "None";
+            await File.WriteAllTextAsync(forgedPath, manifest.ToJsonString());
+            _ = await ManifestJson.ReadAsync(forgedPath, CancellationToken.None);
+
+            foreach (var arguments in new[]
+            {
+                new[] { "check", FindRepositoryFile("tests", "PackageConsumerFixture", "PackageConsumerFixture.csproj"), "--baseline", forgedPath, "--format", "json", "--severity", "all", "--no-telemetry" },
+                new[] { "diff", capturedPath, forgedPath, "--format", "json", "--severity", "all", "--no-telemetry" }
+            })
+            {
+                using var output = new StringWriter();
+                using var errors = new StringWriter();
+                var exitCode = await CommandRunner.RunAsync(arguments, output, errors);
+
+                AssertAnalysisErrorEnvelope(exitCode, output.ToString(), errors.ToString(), root.FullName);
+                Assert.Contains("compared canonical method identity", output.ToString(), StringComparison.Ordinal);
+            }
+        }
+        finally
+        {
+            root.Delete(true);
+        }
+    }
+
+    private static async Task CaptureConsumerFixtureAsync(string outputPath)
+    {
+        using var output = new StringWriter();
+        using var errors = new StringWriter();
+        var exitCode = await CommandRunner.RunAsync(["capture", FindRepositoryFile("tests", "PackageConsumerFixture", "PackageConsumerFixture.csproj"), "--output", outputPath, "--no-telemetry"], output, errors);
+        Assert.Equal(0, exitCode);
+        Assert.Empty(errors.ToString());
+    }
+
+    private static void AssertAnalysisErrorEnvelope(int exitCode, string output, string errors, string forbiddenPath)
+    {
+        Assert.Equal(3, exitCode);
+        Assert.Empty(errors);
+        using var document = JsonDocument.Parse(output);
+        Assert.Empty(document.RootElement.GetProperty("toolErrors").EnumerateArray());
+        Assert.NotEmpty(document.RootElement.GetProperty("analysisErrors").EnumerateArray());
+        Assert.Empty(document.RootElement.GetProperty("findings").EnumerateArray());
+        Assert.False(document.RootElement.GetProperty("coverageComplete").GetBoolean());
+        Assert.DoesNotContain(forbiddenPath, output, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("at KeelMatrix", output, StringComparison.Ordinal);
     }
 
     private static string FindRepositoryFile(params string[] parts)

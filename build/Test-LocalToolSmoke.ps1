@@ -200,13 +200,29 @@ try {
         )
 
         $tamperedManifest = Get-Content -Raw -LiteralPath $baseline | ConvertFrom-Json
-        $identity = 'Logging.Event`0(None:Microsoft.Extensions.Logging.ILogger,None:string,None:string,None:string)'
-        $targetEvents = @($tamperedManifest.events | Where-Object identity -eq $identity)
-        Assert-That ($targetEvents.Count -eq 1) 'the installed capture must contain the canonical reviewer identity'
+        $targetMethod = if ($Mutation -in @('derived-as-none', 'derived-coordinated-none')) { 'DerivedException' } else { 'Event' }
+        $targetEvents = @($tamperedManifest.events | Where-Object method -eq $targetMethod)
+        Assert-That ($targetEvents.Count -eq 1) "the installed capture must contain the canonical $targetMethod identity"
         $targetEvent = $targetEvents[0]
         switch ($Mutation) {
             'reviewer-exact' {
                 $targetEvent.parameterForms = @('Exception', 'ILogger')
+            }
+            'string-as-exception' {
+                $forms = @($targetEvent.parameterForms)
+                $forms[1] = 'Exception'
+                $targetEvent.parameterForms = $forms
+            }
+            'derived-as-none' {
+                $forms = @($targetEvent.parameterForms)
+                $forms[1] = 'None'
+                $targetEvent.parameterForms = $forms
+            }
+            'derived-coordinated-none' {
+                $targetEvent.identity = ([string]$targetEvent.identity).Replace(':Exception:DerivedProblem', ':None:DerivedProblem')
+                $forms = @($targetEvent.parameterForms)
+                $forms[1] = 'None'
+                $targetEvent.parameterForms = $forms
             }
             'wrong-containing-type' { $targetEvent.containingType = 'Totally.Wrong.Type' }
             'wrong-method' { $targetEvent.method = 'WrongMethod' }
@@ -259,6 +275,22 @@ try {
         Assert-AnalysisErrorEnvelope -Result $tamperedDiff -Label "installed $mutation diff" -ForbiddenPath $freshCheckout
     }
 
+    foreach ($mutation in @('string-as-exception', 'derived-as-none')) {
+        $symmetricManifest = Join-Path $freshCheckout "symmetric-$mutation.json"
+        Write-IdentityMutation -Mutation $mutation -Destination $symmetricManifest
+        $symmetricDiff = Invoke-LocalTool -Label "local-manifest symmetric $mutation diff" -Arguments @('diff', $symmetricManifest, $symmetricManifest, '--format', 'json', '--severity', 'all', '--no-telemetry')
+        Assert-AnalysisErrorEnvelope -Result $symmetricDiff -Label "installed symmetric $mutation diff" -ForbiddenPath $freshCheckout
+    }
+
+    $comparisonFormManifest = Join-Path $freshCheckout 'comparison-derived-coordinated-none.json'
+    Write-IdentityMutation -Mutation 'derived-coordinated-none' -Destination $comparisonFormManifest
+    $comparisonFormCheck = Invoke-LocalTool -Label 'local-manifest comparison-form check' -Arguments @('check', $consumerProject, '--baseline', $comparisonFormManifest, '--format', 'json', '--severity', 'all', '--no-telemetry')
+    Assert-AnalysisErrorEnvelope -Result $comparisonFormCheck -Label 'installed comparison-form check' -ForbiddenPath $freshCheckout
+    Assert-That ($comparisonFormCheck.Output -match 'compared canonical method identity') 'installed comparison-form check must exercise the comparison-originated analysis error'
+    $comparisonFormDiff = Invoke-LocalTool -Label 'local-manifest comparison-form diff' -Arguments @('diff', $baseline, $comparisonFormManifest, '--format', 'json', '--severity', 'all', '--no-telemetry')
+    Assert-AnalysisErrorEnvelope -Result $comparisonFormDiff -Label 'installed comparison-form diff' -ForbiddenPath $freshCheckout
+    Assert-That ($comparisonFormDiff.Output -match 'compared canonical method identity') 'installed comparison-form diff must exercise the comparison-originated analysis error'
+
     $reviewerBaseline = Join-Path $freshCheckout 'tampered-reviewer-exact.json'
     $reviewerText = Invoke-LocalTool -Label 'local-manifest reviewer-exact text check' -Arguments @('check', $consumerProject, '--baseline', $reviewerBaseline, '--severity', 'all', '--no-telemetry')
     Assert-That ($reviewerText.ExitCode -eq 3 -and $reviewerText.Output -match '(?m)^ANALYSIS ERROR ') 'the reviewer-exact text check must return an analysis error and exit 3'
@@ -266,7 +298,11 @@ try {
     Assert-That ($reviewerText.Output -notmatch '(?m)^\s*at KeelMatrix\.') 'the reviewer-exact text check must not expose a stack trace'
 
     $derivedEvent = @($capturedManifest.events | Where-Object method -eq 'DerivedException')
-    Assert-That ($derivedEvent.Count -eq 1 -and (@($derivedEvent[0].parameterForms) -join ',') -eq 'ILogger,Exception') 'installed capture must preserve the positional derived-exception form'
+    Assert-That ($derivedEvent.Count -eq 1 -and (@($derivedEvent[0].parameterForms) -join ',') -eq 'ILogger,Exception' -and ([string]$derivedEvent[0].identity).Contains(':Exception:DerivedProblem', [StringComparison]::Ordinal)) 'installed capture must preserve the canonical non-suffix derived-exception form'
+    $exactExceptionEvent = @($capturedManifest.events | Where-Object method -eq 'ExactException')
+    Assert-That ($exactExceptionEvent.Count -eq 1 -and (@($exactExceptionEvent[0].parameterForms) -join ',') -eq 'ILogger,Exception' -and ([string]$exactExceptionEvent[0].identity).Contains(':Exception:System.Exception', [StringComparison]::Ordinal)) 'installed capture must preserve the canonical exact System.Exception form'
+    $ordinaryCustomEvent = @($capturedManifest.events | Where-Object method -eq 'OrdinaryCustom')
+    Assert-That ($ordinaryCustomEvent.Count -eq 1 -and (@($ordinaryCustomEvent[0].parameterForms) -join ',') -eq 'ILogger,None' -and ([string]$ordinaryCustomEvent[0].identity).Contains(':None:OrdinaryProblem', [StringComparison]::Ordinal)) 'installed capture must preserve the canonical ordinary custom-type form'
 
     $incompleteBaseline = Join-Path $freshCheckout 'incomplete.json'
     $incompleteManifest = Get-Content -Raw -LiteralPath $baseline | ConvertFrom-Json

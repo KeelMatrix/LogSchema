@@ -114,6 +114,27 @@ public sealed class ComparisonEngineTests
     }
 
     [Fact]
+    public void SemanticFormChangesForOneCanonicalSignatureAreAnalysisErrors()
+    {
+        var oldEvent = Event("Old", 1, "Old", "Information", "old") with
+        {
+            Identity = "P.Logging.Old`0(None:ILogger:Microsoft.Extensions.Logging.ILogger,None:Exception:P.DerivedProblem)",
+            ParameterRefKinds = ["None", "None"],
+            ParameterForms = ["ILogger", "Exception"]
+        };
+        var newEvent = oldEvent with
+        {
+            Identity = "P.Logging.Old`0(None:ILogger:Microsoft.Extensions.Logging.ILogger,None:None:P.DerivedProblem)",
+            ParameterForms = ["ILogger", "None"]
+        };
+
+        var report = Compare(Manifest(oldEvent), Manifest(newEvent));
+
+        Assert.Empty(report.Findings);
+        Assert.Contains(report.AnalysisErrors, error => error.Contains("compared canonical method identity", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void LevelChangeIsWarningAndTemplateProseChangeIsInfo()
     {
         var warning = Compare(Manifest(Event("Old", 1, "Old", "Information", "old {Value}", "Value")), Manifest(Event("Old", 1, "Old", "Warning", "old {Value}", "Value")), SeverityGate.Breaking);
@@ -156,5 +177,5 @@ public sealed class ComparisonEngineTests
 
     private static ManifestDocument Manifest(params EventContract[] events) => new(1, [new ProjectIdentity("P|net8.0", "P", "P", "net8.0")], events, [], [], [], []);
 
-    private static EventContract Event(string method, int eventId, string eventName, string level, string message, params string[] placeholders) => new("P|net8.0", "P.Logging." + method + "`0(Microsoft.Extensions.Logging.ILogger)", "P.Logging", method, 0, ["None"], eventId, eventName, level, message, placeholders.Select(name => new Placeholder(name, name)).ToArray(), ["ILogger"], new SourceLocation("Logging.cs", 1, "source"));
+    private static EventContract Event(string method, int eventId, string eventName, string level, string message, params string[] placeholders) => new("P|net8.0", "P.Logging." + method + "`0(None:ILogger:Microsoft.Extensions.Logging.ILogger)", "P.Logging", method, 0, ["None"], eventId, eventName, level, message, placeholders.Select(name => new Placeholder(name, name)).ToArray(), ["ILogger"], new SourceLocation("Logging.cs", 1, "source"));
 }
