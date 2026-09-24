@@ -25,7 +25,7 @@ foreach ($readme in @($rootReadme, $packageReadme)) {
     Assert-That ($readme -match '(?m)^### Global tool alternative$') 'the global installation path must be clearly separate'
     Assert-That ($readme -match '(?m)^dotnet tool install --global KeelMatrix\.LogSchema$') 'the global alternative must remain documented'
     Assert-That ($readme -match '\.NET 8 runtime' -and $readme -match '10\.0\.401') 'consumer runtime and verified project-loading SDK prerequisites must be explicit'
-    Assert-That ($readme -match 'recomputes? every parameter form|recomputes? each parameter form' -and $readme -match 'derived exception' -and $readme -match 'form `None`') 'consumer documentation must describe reader-computed forms and supported derived exceptions'
+    Assert-That ($readme -match 'parses every declared type with Roslyn' -and $readme -match 'byte-identical to the canonical rendering' -and $readme -match 'wrong-arity' -and $readme -match 'derived exception') 'consumer documentation must describe canonical type authenticity and supported derived exceptions'
     Assert-That ($readme -notmatch '(?i)company integration|later package step|package step') 'product documentation must not contain obsolete internal integration or packaging-stage wording'
 }
 
@@ -37,7 +37,7 @@ Assert-That ($phase0 -notmatch '(?i)candidate SHA|independent re-verification|sp
 
 $security = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot 'SECURITY.md')
 Assert-That ($security -match '0\.1\.x' -and $security -match '0\.1\.0') 'supported security versions must name the intended first release line'
-Assert-That ($security -match 'recomputes every parameter form solely from its canonical declared type' -and $security -match 'does not trust a manifest to assert arbitrary type-hierarchy semantics') 'security documentation must describe the reader-computed authenticity boundary'
+Assert-That ($security -match 'recomputes every parameter form\s+solely from the canonical declared type' -and $security -match 'does not trust a manifest to assert arbitrary type-hierarchy semantics') 'security documentation must describe the reader-computed authenticity boundary'
 Assert-That ($security -notmatch 'current supported release line is v1') 'supported security versions must not use the obsolete v1 line'
 
 $diagnostics = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot 'COMPATIBILITY-RULES.md')
@@ -52,12 +52,13 @@ $privacy = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot 'PRIVACY.md'
 Assert-That ($privacy -match 'contains no telemetry client' -and $privacy -match 'makes no network requests') 'privacy claims must match the shipping implementation'
 $manifest = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot 'MANIFEST.md')
 Assert-That ($manifest -match 'contains no telemetry client' -and $manifest -match '10\.0\.401') 'manifest privacy and SDK claims must match the shipping implementation'
-Assert-That ($manifest -match '<ref-kind>:<semantic-form>:<canonical-type>' -and $manifest -match 'recomputes the required form vector' -and $manifest -match 'additive, subtractive, or substituted') 'the manifest contract must document reader-computed canonical parameter forms'
+Assert-That ($manifest -match '<ref-kind>:<semantic-form>:<canonical-type>' -and $manifest -match 'parses it with Roslyn' -and $manifest -match 'byte-for-byte equality' -and $manifest -match 'recomputes the required form vector' -and $manifest -match 'additive, subtractive, or substituted') 'the manifest contract must document reader-computed canonical parameter forms'
 foreach ($row in @(
-        '`Microsoft.Extensions.Logging.ILogger` \(including constructed logger types\).*`ILogger`',
-        'exact `Microsoft.Extensions.Logging.LogLevel`.*`LogLevel`',
-        'exact `System.Exception`.*`Exception`',
-        'every other type, including any type that derives from `System.Exception`.*`None`'
+        'exactly `Microsoft.Extensions.Logging.ILogger` with arity 0.*`ILogger`',
+        'exactly top-level `Microsoft.Extensions.Logging.ILogger<T>` with arity 1.*`ILogger`',
+        'exactly top-level `Microsoft.Extensions.Logging.LogLevel` with arity 0.*`LogLevel`',
+        'exactly top-level `System.Exception` with arity 0.*`Exception`',
+        'every other top-level canonical type.*`None`'
     )) {
     Assert-That ($manifest -match $row) "the manifest contract must contain decision-table row: $row"
 }

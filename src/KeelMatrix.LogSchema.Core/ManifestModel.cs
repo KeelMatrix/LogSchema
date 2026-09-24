@@ -2,7 +2,9 @@ using System.Security;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 namespace KeelMatrix.LogSchema;
 
@@ -551,9 +553,13 @@ internal static class ManifestJson
         if (containingType.Length == 0 || method.Length == 0 ||
             !string.Equals(containingType, containingType.Trim(), StringComparison.Ordinal) ||
             !string.Equals(method, method.Trim(), StringComparison.Ordinal) ||
-            !IsCanonicalTypeSyntax(containingType) || !IsCanonicalIdentifier(method) ||
-            !int.TryParse(arityText, out var genericArity) || genericArity < 0 ||
-            !string.Equals(arityText, genericArity.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal))
+            !TryParseCanonicalType(containingType, out _) || !IsCanonicalIdentifier(method) ||
+            !int.TryParse(arityText, out var genericArity))
+        {
+            throw new ManifestValidationException("A manifest event contains a malformed method identity.");
+        }
+
+        if (genericArity < 0 || !string.Equals(arityText, genericArity.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal))
         {
             throw new ManifestValidationException("A manifest event contains a malformed method identity.");
         }
@@ -573,17 +579,135 @@ internal static class ManifestJson
     private static string CreateComparisonIdentity(ParsedMethodIdentity identity) =>
         identity.ContainingType + "." + identity.Method + "`" + identity.GenericArity.ToString(System.Globalization.CultureInfo.InvariantCulture) + "(" + string.Join(",", identity.Parameters.Select(parameter => parameter.RefKind + ":" + parameter.Type)) + ")";
 
-    private static bool IsLoggerType(string type) =>
-        type == "Microsoft.Extensions.Logging.ILogger" ||
-        type.StartsWith("Microsoft.Extensions.Logging.ILogger<", StringComparison.Ordinal) && type.EndsWith('>');
+    internal static string GetRequiredParameterForm(string type)
+    {
+        if (!TryGetRequiredParameterForm(type, out var form))
+        {
+            throw new ManifestValidationException("A manifest event contains a non-canonical declared type.");
+        }
 
-    internal static string GetRequiredParameterForm(string type) => IsLoggerType(type)
-        ? "ILogger"
-        : type == "Microsoft.Extensions.Logging.LogLevel"
-            ? "LogLevel"
-            : type == "System.Exception"
-                ? "Exception"
-                : "None";
+        return form;
+    }
+
+    internal static bool TryGetRequiredParameterForm(string type, out string form)
+    {
+        form = "None";
+        if (!TryParseCanonicalType(type, out var syntax))
+        {
+            return false;
+        }
+
+        form = ClassifyParameterForm(syntax);
+        return true;
+    }
+
+    private static bool TryParseCanonicalType(string value, out TypeSyntax syntax)
+    {
+        syntax = null!;
+        if (string.IsNullOrEmpty(value))
+        {
+            return false;
+        }
+
+        var parsed = SyntaxFactory.ParseTypeName(value);
+        if (parsed.ContainsDiagnostics || parsed.DescendantNodesAndSelf().OfType<AliasQualifiedNameSyntax>().Any(alias => !string.Equals(alias.Alias.Identifier.ValueText, "global", StringComparison.Ordinal)))
+        {
+            return false;
+        }
+
+        var canonical = (TypeSyntax)new CanonicalTypeRewriter().Visit(parsed.WithoutTrivia())!;
+        if (!string.Equals(value, canonical.ToFullString(), StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        syntax = canonical;
+        return true;
+    }
+
+    private static string ClassifyParameterForm(TypeSyntax syntax)
+    {
+        if (!TryGetNamedTypeSegments(syntax, out var segments))
+        {
+            return "None";
+        }
+
+        if (MatchesNamedType(segments, ["Microsoft", "Extensions", "Logging"], "ILogger", 0, 1))
+        {
+            return "ILogger";
+        }
+
+        if (MatchesNamedType(segments, ["Microsoft", "Extensions", "Logging"], "LogLevel", 0))
+        {
+            return "LogLevel";
+        }
+
+        if (MatchesNamedType(segments, ["System"], "Exception", 0))
+        {
+            return "Exception";
+        }
+
+        return "None";
+    }
+
+    private static bool TryGetNamedTypeSegments(TypeSyntax syntax, out IReadOnlyList<NamedTypeSegment> segments)
+    {
+        var result = new List<NamedTypeSegment>();
+        if (syntax is not NameSyntax name || !AppendNamedTypeSegments(name, result))
+        {
+            segments = Array.Empty<NamedTypeSegment>();
+            return false;
+        }
+
+        segments = result;
+        return true;
+    }
+
+    private static bool AppendNamedTypeSegments(NameSyntax name, List<NamedTypeSegment> segments)
+    {
+        switch (name)
+        {
+            case QualifiedNameSyntax qualified:
+                return AppendNamedTypeSegments(qualified.Left, segments) && AppendNamedTypeSegment(qualified.Right, segments);
+            case AliasQualifiedNameSyntax:
+                return false;
+            default:
+                return name is SimpleNameSyntax simple && AppendNamedTypeSegment(simple, segments);
+        }
+    }
+
+    private static bool AppendNamedTypeSegment(SimpleNameSyntax name, List<NamedTypeSegment> segments)
+    {
+        switch (name)
+        {
+            case IdentifierNameSyntax identifier:
+                segments.Add(new NamedTypeSegment(identifier.Identifier.ValueText, 0));
+                return true;
+            case GenericNameSyntax generic:
+                segments.Add(new NamedTypeSegment(generic.Identifier.ValueText, generic.TypeArgumentList.Arguments.Count));
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    private static bool MatchesNamedType(IReadOnlyList<NamedTypeSegment> segments, IReadOnlyList<string> namespaceSegments, string typeName, params int[] acceptedArities)
+    {
+        if (segments.Count != namespaceSegments.Count + 1 || !acceptedArities.Contains(segments[^1].Arity))
+        {
+            return false;
+        }
+
+        for (var index = 0; index < namespaceSegments.Count; index++)
+        {
+            if (segments[index].Arity != 0 || !string.Equals(segments[index].Name, namespaceSegments[index], StringComparison.Ordinal))
+            {
+                return false;
+            }
+        }
+
+        return string.Equals(segments[^1].Name, typeName, StringComparison.Ordinal);
+    }
 
     private static IReadOnlyList<ParsedParameterIdentity> ParseIdentityParameters(string value)
     {
@@ -638,7 +762,7 @@ internal static class ManifestJson
             var refKind = parameter[..refKindSeparator];
             var form = parameter[(refKindSeparator + 1)..formSeparator];
             var type = parameter[(formSeparator + 1)..];
-            if (!ParameterRefKinds.Contains(refKind) || !ParameterForms.Contains(form) || !string.Equals(type, type.Trim(), StringComparison.Ordinal) || type.Contains("global::", StringComparison.Ordinal) || !IsCanonicalTypeSyntax(type))
+            if (!ParameterRefKinds.Contains(refKind) || !ParameterForms.Contains(form) || !string.Equals(type, type.Trim(), StringComparison.Ordinal) || !TryGetRequiredParameterForm(type, out _))
             {
                 throw new ManifestValidationException("A manifest event contains a malformed method identity.");
             }
@@ -648,12 +772,6 @@ internal static class ManifestJson
         }
 
         return parameters;
-    }
-
-    private static bool IsCanonicalTypeSyntax(string value)
-    {
-        var syntax = SyntaxFactory.ParseTypeName(value);
-        return !syntax.ContainsDiagnostics && syntax.FullSpan.Length == value.Length && string.Equals(syntax.ToFullString(), value, StringComparison.Ordinal);
     }
 
     private static bool IsCanonicalIdentifier(string value) =>
@@ -678,6 +796,27 @@ internal static class ManifestJson
         }
     }
 
+    private sealed class CanonicalTypeRewriter : CSharpSyntaxRewriter
+    {
+        public override SyntaxNode? VisitAliasQualifiedName(AliasQualifiedNameSyntax node)
+        {
+            if (string.Equals(node.Alias.Identifier.ValueText, "global", StringComparison.Ordinal))
+            {
+                return Visit(node.Name);
+            }
+
+            return base.VisitAliasQualifiedName(node);
+        }
+
+        public override SyntaxToken VisitToken(SyntaxToken token)
+        {
+            return token.IsKind(SyntaxKind.IdentifierToken)
+                ? SyntaxFactory.Identifier(token.ValueText)
+                : token;
+        }
+    }
+
+    private sealed record NamedTypeSegment(string Name, int Arity);
     private sealed record ParsedMethodIdentity(string ContainingType, string Method, int GenericArity, IReadOnlyList<ParsedParameterIdentity> Parameters);
 
     private sealed record ParsedParameterIdentity(string RefKind, string Form, string Type);

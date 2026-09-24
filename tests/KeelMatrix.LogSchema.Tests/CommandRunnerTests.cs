@@ -16,8 +16,9 @@ public sealed class CommandRunnerTests
         Assert.Contains("logschema capture", output.ToString(), StringComparison.Ordinal);
         Assert.Contains("--no-telemetry", output.ToString(), StringComparison.Ordinal);
         Assert.Contains("contains no telemetry client", output.ToString(), StringComparison.Ordinal);
-        Assert.Contains("Forms are recomputed from declared types", output.ToString(), StringComparison.Ordinal);
-        Assert.Contains("Embedded forms and parameterForms must equal that vector", output.ToString(), StringComparison.Ordinal);
+        Assert.Contains("Declared type text must be canonical", output.ToString(), StringComparison.Ordinal);
+        Assert.Contains("forms are classified structurally", output.ToString(), StringComparison.Ordinal);
+        Assert.Contains("Raw type prefixes and suffixes are never trusted", output.ToString(), StringComparison.Ordinal);
         Assert.Contains("incomplete coverage and no findings", output.ToString(), StringComparison.Ordinal);
         Assert.Empty(errors.ToString());
     }

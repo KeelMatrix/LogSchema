@@ -326,6 +326,25 @@ try {
         }
     }
 
+    $typeAuthenticityMutations = @(
+        [pscustomobject]@{ Name = 'escaped-system-exception'; Old = 'None:None:string'; New = 'None:None:System.@Exception' },
+        [pscustomobject]@{ Name = 'escaped-loglevel'; Old = 'None:None:string'; New = 'None:None:Microsoft.Extensions.Logging.@LogLevel' },
+        [pscustomobject]@{ Name = 'escaped-ilogger'; Old = 'None:None:string'; New = 'None:None:Microsoft.Extensions.Logging.@ILogger<Probe.Category>' },
+        [pscustomobject]@{ Name = 'trivia-whitespace'; Old = 'None:None:string'; New = 'None:None:Microsoft.Extensions.Logging.ILogger <Probe.Category>' },
+        [pscustomobject]@{ Name = 'wrong-ilogger-arity'; Old = 'None:ILogger:Microsoft.Extensions.Logging.ILogger'; New = 'None:ILogger:Microsoft.Extensions.Logging.ILogger<Probe.Category,Probe.Other>' },
+        [pscustomobject]@{ Name = 'nested-generic-member'; Old = 'None:ILogger:Microsoft.Extensions.Logging.ILogger'; New = 'None:ILogger:Microsoft.Extensions.Logging.ILogger<Probe.Category>.Nested<Probe.Other>' }
+    )
+    foreach ($mutation in $typeAuthenticityMutations) {
+        $tamperedManifest = Get-Content -Raw -LiteralPath $baseline | ConvertFrom-Json
+        $targetEvent = @($tamperedManifest.events | Where-Object method -eq 'Event')
+        Assert-That ($targetEvent.Count -eq 1) "the installed capture must contain the canonical Event identity for $($mutation.Name)"
+        $targetEvent[0].identity = $targetEvent[0].identity.Replace($mutation.Old, $mutation.New, [StringComparison]::Ordinal)
+        $tamperedBaseline = Join-Path $freshCheckout "tampered-type-$($mutation.Name).json"
+        $tamperedManifest | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $tamperedBaseline -Encoding utf8NoBOM
+        $selfDiff = Invoke-LocalTool -Label "local-manifest $($mutation.Name) self-diff" -Arguments @('diff', $tamperedBaseline, $tamperedBaseline, '--format', 'json', '--severity', 'all', '--no-telemetry')
+        Assert-AnalysisErrorEnvelope -Result $selfDiff -Label "installed $($mutation.Name) self-diff" -ForbiddenPath $freshCheckout
+    }
+
     $comparisonErrorManifest = Join-Path $freshCheckout 'comparison-analysis-error.json'
     $comparisonError = Get-Content -Raw -LiteralPath $baseline | ConvertFrom-Json
     $comparisonError.analysisIssues = @([pscustomobject]@{

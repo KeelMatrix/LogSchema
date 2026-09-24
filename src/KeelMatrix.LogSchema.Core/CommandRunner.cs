@@ -312,8 +312,9 @@ Compatibility summary:
   WARNING  LogLevel changes (use --severity warning to gate).
   INFO     Event/placeholder additions and prose-only template changes with unchanged structured shape.
   Structured identity fields use exact ordinal comparison; case-only placeholder renames are KMLOG102.
-  Forms are recomputed from declared types: ILogger/logger types, exact LogLevel, exact Exception, else None.
-  Embedded forms and parameterForms must equal that vector; contradictions return 3 with incomplete coverage and no findings.
+  Declared type text must be canonical; forms are classified structurally: top-level ILogger arity 0/1,
+  exact top-level LogLevel or Exception, else None. Non-canonical text and form contradictions return 3
+  with incomplete coverage and no findings. Raw type prefixes and suffixes are never trusted.
   KMLOGP006 means no supported [LoggerMessage] declarations were found; capture/check return 3 and
   capture does not write a baseline. diff remains a pure manifest comparison.
 """;

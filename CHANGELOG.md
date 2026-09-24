@@ -8,6 +8,7 @@ Changes for the KeelMatrix.LogSchema package are recorded here using the Keep a 
 
 - Deterministic schema-v1 manifests for supported source-generated `LoggerMessage` declarations, with fail-closed canonical event-identity validation.
 - Reader-computed positional parameter forms derived only from canonical declared types, with exact `System.Exception` distinguished from supported derived exception parameters and fail-closed validation of embedded and redundant values.
+- Canonical declared-type spelling enforcement and structural form classification, including fail-closed handling for escaped identifiers, trivia, wrong-arity logger types, and generic-rooted nested members.
 - Offline `capture`, `check`, and `diff` commands with text and JSON diagnostics and CI-friendly exit codes.
 - Stable compatibility classification for event, identity, structured-placeholder, level, and template changes.
 - Explicit unsupported-declaration and analysis-error reporting without target application execution.

@@ -10,6 +10,8 @@ public sealed class ManifestJsonTests
     [Theory]
     [InlineData("Microsoft.Extensions.Logging.ILogger", "ILogger")]
     [InlineData("Microsoft.Extensions.Logging.ILogger<P.Category>", "ILogger")]
+    [InlineData("Microsoft.Extensions.Logging.ILogger<P.Category,P.Other>", "None")]
+    [InlineData("Microsoft.Extensions.Logging.ILogger<P.Category>.Nested<P.Other>", "None")]
     [InlineData("Microsoft.Extensions.Logging.LogLevel", "LogLevel")]
     [InlineData("System.Exception", "Exception")]
     [InlineData("P.DerivedProblem", "None")]
@@ -421,14 +423,22 @@ public sealed class ManifestJsonTests
         var redundantPath = Path.Combine(root.FullName, "redundant.json");
         var typePool = new[]
         {
-            "Microsoft.Extensions.Logging.ILogger",
-            "Microsoft.Extensions.Logging.ILogger<P.OrdinaryProblem>",
-            "Microsoft.Extensions.Logging.LogLevel",
-            "System.Exception",
-            "P.DerivedProblem",
-            "P.OrdinaryProblem",
-            "string"
+            new TypePoolEntry("Microsoft.Extensions.Logging.ILogger", "ILogger", true),
+            new TypePoolEntry("Microsoft.Extensions.Logging.ILogger<P.OrdinaryProblem>", "ILogger", true),
+            new TypePoolEntry("Microsoft.Extensions.Logging.LogLevel", "LogLevel", true),
+            new TypePoolEntry("System.Exception", "Exception", true),
+            new TypePoolEntry("P.DerivedProblem", "None", true),
+            new TypePoolEntry("P.OrdinaryProblem", "None", true),
+            new TypePoolEntry("string", "None", true),
+            new TypePoolEntry("global::System.Exception", "None", false),
+            new TypePoolEntry("System.@Exception", "None", false),
+            new TypePoolEntry("Microsoft.Extensions.Logging.@LogLevel", "None", false),
+            new TypePoolEntry("Microsoft.Extensions.Logging.@ILogger<P.OrdinaryProblem>", "None", false),
+            new TypePoolEntry("Microsoft.Extensions.Logging.ILogger <P.OrdinaryProblem>", "None", false),
+            new TypePoolEntry("Microsoft.Extensions.Logging.ILogger<P.OrdinaryProblem,P.Other>", "ILogger", false),
+            new TypePoolEntry("Microsoft.Extensions.Logging.ILogger<P.OrdinaryProblem>.Nested<P.Other>", "ILogger", false)
         };
+        var canonicalTypePool = typePool.Where(entry => entry.IsCanonical).ToArray();
         var allForms = new[] { "None", "Exception", "ILogger", "LogLevel" };
 
         try
@@ -436,7 +446,7 @@ public sealed class ManifestJsonTests
             for (var iteration = 0; iteration < cases; iteration++)
             {
                 var parameterCount = random.Next(1, 9);
-                var types = Enumerable.Range(0, parameterCount).Select(_ => typePool[random.Next(typePool.Length)]).ToArray();
+                var types = Enumerable.Range(0, parameterCount).Select(_ => canonicalTypePool[random.Next(canonicalTypePool.Length)].Text).ToArray();
                 types[random.Next(parameterCount)] = random.Next(2) == 0
                     ? "Microsoft.Extensions.Logging.ILogger"
                     : "Microsoft.Extensions.Logging.ILogger<P.OrdinaryProblem>";
@@ -468,6 +478,14 @@ public sealed class ManifestJsonTests
                     await File.WriteAllTextAsync(redundantPath, JsonSerializer.Serialize(redundantForgery));
                     await Assert.ThrowsAsync<ManifestReadException>(() => ManifestJson.ReadAsync(redundantPath, CancellationToken.None));
                 }
+            }
+
+            foreach (var (mutation, index) in typePool.Where(entry => !entry.IsCanonical).Select((entry, index) => (entry, index)))
+            {
+                var invalid = FormManifest("Mutated" + index.ToString(System.Globalization.CultureInfo.InvariantCulture), ["Microsoft.Extensions.Logging.ILogger", mutation.Text], ["ILogger", mutation.ExpectedForm], ["ILogger", mutation.ExpectedForm]);
+                var mutationPath = Path.Combine(root.FullName, "mutation-" + Guid.NewGuid().ToString("N") + ".json");
+                await File.WriteAllTextAsync(mutationPath, JsonSerializer.Serialize(invalid));
+                await Assert.ThrowsAsync<ManifestReadException>(() => ManifestJson.ReadAsync(mutationPath, CancellationToken.None));
             }
         }
         finally
@@ -519,6 +537,8 @@ public sealed class ManifestJsonTests
             [],
             []);
     }
+
+    private sealed record TypePoolEntry(string Text, string ExpectedForm, bool IsCanonical);
 
     [Fact]
     public async Task FailedOversizedWriteDoesNotReplaceExistingManifest()
