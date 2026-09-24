@@ -350,7 +350,7 @@ internal sealed class LogSchemaExtractor
             level,
             message,
             placeholders,
-            method.Parameters.Where(parameter => IsLogger(parameter.Type) || IsException(parameter.Type) || IsLogLevel(parameter.Type)).Select(parameter => IsLogger(parameter.Type) ? "ILogger" : IsException(parameter.Type) ? "Exception" : "LogLevel").Distinct(StringComparer.Ordinal).OrderBy(value => value, StringComparer.Ordinal).ToArray(),
+            method.Parameters.Select(parameter => IsLogger(parameter.Type) ? "ILogger" : IsException(parameter.Type) ? "Exception" : IsLogLevel(parameter.Type) ? "LogLevel" : "None").ToArray(),
             source);
         return true;
     }

@@ -6,4 +6,13 @@ public static partial class Logging
 {
     [LoggerMessage(EventId = 1100, Level = LogLevel.Information, Message = "Event {First} {Second} {Third}")]
     public static partial void Event(ILogger logger, string first, string second, string third);
+
+    [LoggerMessage(EventId = 1101, Level = LogLevel.Error, Message = "Derived exception")]
+    public static partial void DerivedException(ILogger logger, DerivedProblem exception);
+}
+
+[SuppressMessage("Design", "CA1050:Declare types in namespaces", Justification = "The global type keeps the canonical identity fixture stable.")]
+[SuppressMessage("Naming", "CA1710:Identifiers should have correct suffix", Justification = "A non-Exception suffix proves semantic derived-exception classification.")]
+public sealed class DerivedProblem : Exception
+{
 }

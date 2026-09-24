@@ -116,7 +116,7 @@ public sealed class ManifestJsonTests
                 "Information",
                 $"Processed {{Value{index}}}",
                 [new Placeholder($"Value{index}", $"Value{index}")],
-                ["ILogger"],
+                ["ILogger", "None"],
                 new SourceLocation($"Logging/Event{index}.cs", index + 1, "source")))
             .ToArray();
         var manifest = new ManifestDocument(
@@ -258,6 +258,14 @@ public sealed class ManifestJsonTests
     [InlineData("refKindMismatch")]
     [InlineData("unknownRefKind")]
     [InlineData("parameterFormMismatch")]
+    [InlineData("additiveContainingType")]
+    [InlineData("additiveMethod")]
+    [InlineData("additiveGenericArity")]
+    [InlineData("additiveParameterCount")]
+    [InlineData("additiveFormException")]
+    [InlineData("additiveFormILogger")]
+    [InlineData("additiveFormLogLevel")]
+    [InlineData("additiveFormNone")]
     [InlineData("unknownParameterForm")]
     [InlineData("malformedIdentity")]
     [InlineData("invalidTypeSyntax")]
@@ -285,7 +293,7 @@ public sealed class ManifestJsonTests
               { "name": "Two", "token": "Two" },
               { "name": "Three", "token": "Three" }
             ],
-            "parameterForms": ["ILogger"],
+            "parameterForms": ["ILogger", "None", "None", "None"],
             "source": { "file": "Logging.cs", "line": 1, "kind": "source" }
           }],
           "unsupported": [],
@@ -303,7 +311,15 @@ public sealed class ManifestJsonTests
             case "parameterCount": eventNode["parameterRefKinds"] = JsonNode.Parse("""["None"]"""); break;
             case "refKindMismatch": eventNode["parameterRefKinds"] = JsonNode.Parse("""["None","Ref","None","None"]"""); break;
             case "unknownRefKind": eventNode["parameterRefKinds"] = JsonNode.Parse("""["None","UnknownRefKind","None","None"]"""); break;
-            case "parameterFormMismatch": eventNode["parameterForms"] = JsonNode.Parse("""["Exception"]"""); break;
+            case "parameterFormMismatch": eventNode["parameterForms"] = JsonNode.Parse("""["ILogger","ILogger","None","None"]"""); break;
+            case "additiveContainingType": eventNode["containingType"] = "Logging.Extra"; break;
+            case "additiveMethod": eventNode["method"] = "EventExtra"; break;
+            case "additiveGenericArity": eventNode["genericArity"] = 1; break;
+            case "additiveParameterCount": eventNode["parameterRefKinds"] = JsonNode.Parse("""["None","None","None","None","None"]"""); break;
+            case "additiveFormException": eventNode["parameterForms"] = JsonNode.Parse("""["ILogger","None","None","None","Exception"]"""); break;
+            case "additiveFormILogger": eventNode["parameterForms"] = JsonNode.Parse("""["ILogger","None","None","None","ILogger"]"""); break;
+            case "additiveFormLogLevel": eventNode["parameterForms"] = JsonNode.Parse("""["ILogger","None","None","None","LogLevel"]"""); break;
+            case "additiveFormNone": eventNode["parameterForms"] = JsonNode.Parse("""["ILogger","None","None","None","None"]"""); break;
             case "unknownParameterForm": eventNode["parameterForms"] = JsonNode.Parse("""["UnknownParameterForm"]"""); break;
             case "malformedIdentity": eventNode["identity"] = "Logging.Event`0(None:Microsoft.Extensions.Logging.ILogger"; break;
             case "invalidTypeSyntax": eventNode["identity"] = "Logging.Event`0(None:Microsoft.Extensions.Logging.ILogger,None:string,None:string,None:???)"; break;

@@ -86,6 +86,13 @@ internal static class ComparisonEngine
         {
             analysisErrors.Add(LogSchemaExtractor.EmptyEventsIssueCode + ": " + LogSchemaExtractor.EmptyBaselineEventsIssueMessage);
         }
+        foreach (var key in oldEvents.Keys.Intersect(newEvents.Keys, StringComparer.Ordinal))
+        {
+            if (!oldEvents[key].ParameterForms.SequenceEqual(newEvents[key].ParameterForms, StringComparer.Ordinal))
+            {
+                analysisErrors.Add("A manifest event parameter form contradicts the compared canonical method identity: " + newEvents[key].Identity);
+            }
+        }
 
         var distinctAnalysisErrors = analysisErrors.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
         return new ComparisonReport(normalized, distinctAnalysisErrors);

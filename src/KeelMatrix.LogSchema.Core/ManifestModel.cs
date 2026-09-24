@@ -108,7 +108,8 @@ internal static class ManifestJson
     {
         "Exception",
         "ILogger",
-        "LogLevel"
+        "LogLevel",
+        "None"
     };
 
     private static readonly JsonSerializerOptions Options = new()
@@ -468,18 +469,36 @@ internal static class ManifestJson
             }
 
             if (@event.ParameterRefKinds.Any(kind => !ParameterRefKinds.Contains(kind)) ||
-                @event.ParameterForms.Any(form => !ParameterForms.Contains(form)) ||
-                @event.ParameterForms.Distinct(StringComparer.Ordinal).Count() != @event.ParameterForms.Count ||
-                !@event.ParameterForms.SequenceEqual(@event.ParameterForms.Order(StringComparer.Ordinal), StringComparer.Ordinal))
+                @event.ParameterForms.Count != parsedIdentity.Parameters.Count ||
+                @event.ParameterForms.Any(form => !ParameterForms.Contains(form)))
             {
                 throw new ManifestValidationException("A manifest event contains an invalid parameter form.");
             }
 
-            var hasLoggerParameter = parsedIdentity.Parameters.Any(parameter => IsLoggerType(parameter.Type));
-            var hasLogLevelParameter = parsedIdentity.Parameters.Any(parameter => parameter.Type == "Microsoft.Extensions.Logging.LogLevel");
-            if (!hasLoggerParameter || !@event.ParameterForms.Contains("ILogger", StringComparer.Ordinal) ||
-                hasLogLevelParameter != @event.ParameterForms.Contains("LogLevel", StringComparer.Ordinal) ||
-                parsedIdentity.Parameters.Any(parameter => parameter.Type == "System.Exception") && !@event.ParameterForms.Contains("Exception", StringComparer.Ordinal))
+            var hasLoggerParameter = false;
+            for (var index = 0; index < parsedIdentity.Parameters.Count; index++)
+            {
+                var parameterType = parsedIdentity.Parameters[index].Type;
+                var form = @event.ParameterForms[index];
+                if (IsLoggerType(parameterType))
+                {
+                    hasLoggerParameter = true;
+                    if (form != "ILogger") throw new ManifestValidationException("A manifest event parameter form contradicts its canonical method identity.");
+                }
+                else if (parameterType == "Microsoft.Extensions.Logging.LogLevel")
+                {
+                    if (form != "LogLevel") throw new ManifestValidationException("A manifest event parameter form contradicts its canonical method identity.");
+                }
+                else if (parameterType == "System.Exception")
+                {
+                    if (form != "Exception") throw new ManifestValidationException("A manifest event parameter form contradicts its canonical method identity.");
+                }
+                else if (form is not ("None" or "Exception"))
+                {
+                    throw new ManifestValidationException("A manifest event parameter form contradicts its canonical method identity.");
+                }
+            }
+            if (!hasLoggerParameter)
             {
                 throw new ManifestValidationException("A manifest event parameter form contradicts its canonical method identity.");
             }

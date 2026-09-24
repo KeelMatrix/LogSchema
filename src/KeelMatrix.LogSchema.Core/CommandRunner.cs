@@ -312,7 +312,7 @@ Compatibility summary:
   WARNING  LogLevel changes (use --severity warning to gate).
   INFO     Event/placeholder additions and prose-only template changes with unchanged structured shape.
   Structured identity fields use exact ordinal comparison; case-only placeholder renames are KMLOG102.
-  Malformed or contradictory manifest identity tuples fail analysis with exit 3 before comparison.
+  Redundant identity fields and positional parameter forms require exact equality; additive values fail analysis with exit 3.
   KMLOGP006 means no supported [LoggerMessage] declarations were found; capture/check return 3 and
   capture does not write a baseline. diff remains a pure manifest comparison.
 """;

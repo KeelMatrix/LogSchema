@@ -75,7 +75,7 @@ The complete rule matrix and stable diagnostic codes are maintained in [COMPATIB
 | LogLevel changed | WARNING | no; use `--severity warning` |
 | Template prose changed with the same structured shape | INFO | no |
 
-Structured identity fields are compared with exact ordinal semantics: case-only changes to placeholder names are structured renames (`KMLOG102`), while `KMLOG301` is reserved for prose changes whose structured shape is unchanged under ordinal comparison.
+Structured identity fields are compared with exact ordinal semantics: redundant identity arrays, including positional parameter forms, require exact equality and reject additive values as analysis errors. Case-only changes to placeholder names are structured renames (`KMLOG102`), while `KMLOG301` is reserved for prose changes whose structured shape is unchanged under ordinal comparison.
 
 Intentional changes can be accepted explicitly with repeated `--accept <diagnostic-code>`. Acceptance affects only the current comparison; it never rewrites a baseline.
 

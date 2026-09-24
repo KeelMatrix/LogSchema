@@ -206,11 +206,7 @@ try {
         $targetEvent = $targetEvents[0]
         switch ($Mutation) {
             'reviewer-exact' {
-                $targetEvent.containingType = 'Totally.Wrong.Type'
-                $targetEvent.method = 'WrongMethod'
-                $targetEvent.genericArity = 99
-                $targetEvent.parameterRefKinds = @('UnknownRefKind')
-                $targetEvent.parameterForms = @('UnknownParameterForm')
+                $targetEvent.parameterForms = @('Exception', 'ILogger')
             }
             'wrong-containing-type' { $targetEvent.containingType = 'Totally.Wrong.Type' }
             'wrong-method' { $targetEvent.method = 'WrongMethod' }
@@ -220,6 +216,15 @@ try {
             'unknown-ref-kind' { $targetEvent.parameterRefKinds = @('None', 'UnknownRefKind', 'None', 'None') }
             'wrong-parameter-form' { $targetEvent.parameterForms = @('Exception') }
             'unknown-parameter-form' { $targetEvent.parameterForms = @('UnknownParameterForm') }
+            'additive-containing-type' { $targetEvent.containingType = $targetEvent.containingType + '.Extra' }
+            'additive-method' { $targetEvent.method = $targetEvent.method + 'Extra' }
+            'additive-generic-arity' { $targetEvent.genericArity = $targetEvent.genericArity + 1 }
+            'additive-parameter-count' { $targetEvent.parameterRefKinds = @($targetEvent.parameterRefKinds) + 'None' }
+            'additive-ref-kind' { $targetEvent.parameterRefKinds = @($targetEvent.parameterRefKinds) + 'Ref' }
+            'additive-form-exception' { $targetEvent.parameterForms = @($targetEvent.parameterForms) + 'Exception' }
+            'additive-form-ilogger' { $targetEvent.parameterForms = @($targetEvent.parameterForms) + 'ILogger' }
+            'additive-form-loglevel' { $targetEvent.parameterForms = @($targetEvent.parameterForms) + 'LogLevel' }
+            'additive-form-none' { $targetEvent.parameterForms = @($targetEvent.parameterForms) + 'None' }
             default { throw "Unknown identity mutation: $Mutation" }
         }
         $tamperedManifest | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $Destination -Encoding utf8NoBOM
@@ -234,7 +239,16 @@ try {
         'wrong-ref-kind',
         'unknown-ref-kind',
         'wrong-parameter-form',
-        'unknown-parameter-form'
+        'unknown-parameter-form',
+        'additive-containing-type',
+        'additive-method',
+        'additive-generic-arity',
+        'additive-parameter-count',
+        'additive-ref-kind',
+        'additive-form-exception',
+        'additive-form-ilogger',
+        'additive-form-loglevel',
+        'additive-form-none'
     )
     foreach ($mutation in $identityMutations) {
         $tamperedBaseline = Join-Path $freshCheckout "tampered-$mutation.json"
@@ -250,6 +264,9 @@ try {
     Assert-That ($reviewerText.ExitCode -eq 3 -and $reviewerText.Output -match '(?m)^ANALYSIS ERROR ') 'the reviewer-exact text check must return an analysis error and exit 3'
     Assert-That (-not $reviewerText.Output.Contains($freshCheckout, [StringComparison]::OrdinalIgnoreCase)) 'the reviewer-exact text check must not expose an absolute path'
     Assert-That ($reviewerText.Output -notmatch '(?m)^\s*at KeelMatrix\.') 'the reviewer-exact text check must not expose a stack trace'
+
+    $derivedEvent = @($capturedManifest.events | Where-Object method -eq 'DerivedException')
+    Assert-That ($derivedEvent.Count -eq 1 -and (@($derivedEvent[0].parameterForms) -join ',') -eq 'ILogger,Exception') 'installed capture must preserve the positional derived-exception form'
 
     $incompleteBaseline = Join-Path $freshCheckout 'incomplete.json'
     $incompleteManifest = Get-Content -Raw -LiteralPath $baseline | ConvertFrom-Json
