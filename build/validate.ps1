@@ -326,6 +326,14 @@ Invoke-Timed 'Pinned generator state grounding' { & pwsh -NoProfile -NonInteract
 Invoke-Timed 'Unit and contract tests' { dotnet test (Join-Path $repositoryRoot 'tests/KeelMatrix.LogSchema.Tests/KeelMatrix.LogSchema.Tests.csproj') -c Release --no-build --no-restore --nologo }
 Invoke-Timed 'Phase 0 regression matrix' { & pwsh -NoProfile -NonInteractive -File (Join-Path $repositoryRoot 'build/Test-Phase0Matrix.ps1') }
 Invoke-Timed 'Shipping semantic fixture matrix' { & pwsh -NoProfile -NonInteractive -File (Join-Path $repositoryRoot 'build/Test-ShippingMatrix.ps1') -RepositoryRoot $repositoryRoot }
+Invoke-Timed 'Project-analysis resource and bounded-failure gate' {
+    & pwsh -NoProfile -NonInteractive -File (Join-Path $repositoryRoot 'build/Test-ProjectAnalysisResources.ps1') `
+        -RepositoryRoot $repositoryRoot `
+        -MaxElapsedSeconds 120 `
+        -MaxWorkingSetMiB 1536 `
+        -MaxPrivateMemoryMiB 1024
+    Assert-That ($LASTEXITCODE -eq 0) 'the project-analysis resource gate must pass'
+}
 
 $tool = Join-Path $repositoryRoot 'src/KeelMatrix.LogSchema/bin/Release/net8.0/KeelMatrix.LogSchema.dll'
 $fixtureProject = Join-Path $repositoryRoot 'fixtures/Phase0.Net8/Phase0.Net8.csproj'

@@ -64,7 +64,9 @@ See the repository [compatibility rules](https://github.com/KeelMatrix/LogSchema
 
 Options: `--format text|json`, `--severity breaking|warning|all`, `--accept <code>`, `--no-telemetry`, and `--tfm <target-framework>`. Exit codes are 0 clean, 1 gated findings, 2 invalid invocation/configuration, and 3 project-load or analysis failure. V1 contains no telemetry client; `--no-telemetry` is reserved and accepted.
 
-The tool reads SDK-style C# projects through design-time MSBuild/Roslyn APIs. It does not execute target application code, inspect runtime logs, or replace secret/redaction tooling. After restore, analysis is local and does not require a hosted service.
+The tool reads SDK-style C# projects through design-time MSBuild/Roslyn APIs. It does not execute target application code, inspect runtime logs, or replace secret/redaction tooling. After dependencies are available, LogSchema itself makes no product-owned network requests and does not require a hosted service; `capture` and `check` still invoke MSBuild evaluation, so target projects and their imports or tasks may have their own network behavior.
+
+Project analysis fails closed with exit code 3 when an input exceeds 64 C# projects, 512 documents in one project, or 4,096 documents across the input. These are safety ceilings rather than performance promises; see the repository's [project-analysis resource gate](https://github.com/KeelMatrix/LogSchema/blob/main/docs/PROJECT-ANALYSIS-RESOURCES.md) for the reproducible fixture and validation budget.
 
 ## Platform support
 

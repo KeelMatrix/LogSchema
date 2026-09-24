@@ -36,7 +36,9 @@ Assert-That ($phase0 -match 'packaged type-by-form matrix' -and $phase0 -match '
 Assert-That ($phase0 -notmatch '(?i)candidate SHA|independent re-verification|specification section|contains no shipping CLI') 'semantic fixture documentation must not retain obsolete milestone or review material'
 
 $security = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot 'SECURITY.md')
-Assert-That ($security -match '0\.1\.x' -and $security -match '0\.1\.0') 'supported security versions must name the intended first release line'
+Assert-That ($security -match 'supports the `0\.1\.x` release line' -and $security -match '0\.1\.0') 'supported security versions must name the supported release line'
+Assert-That ($security -notmatch '(?i)intended first|before the first public package|after publication') 'security documentation must remain release-state-neutral'
+Assert-That ($security -match 'product-owned network requests' -and $security -match 'MSBuild project evaluation' -and $security -match 'target projects') 'security documentation must distinguish LogSchema network behavior from target-project evaluation'
 Assert-That ($security -match 'recomputes every parameter form\s+solely from the canonical declared type' -and $security -match 'does not trust a manifest to assert arbitrary type-hierarchy semantics') 'security documentation must describe the reader-computed authenticity boundary'
 Assert-That ($security -notmatch 'current supported release line is v1') 'supported security versions must not use the obsolete v1 line'
 
@@ -49,7 +51,7 @@ Assert-That ($diagnostics -match 'additive, subtractive, or substituted differen
 Assert-That ($diagnostics -match 'comparison-time analysis errors' -and $diagnostics -match 'coverageComplete.*false') 'the diagnostic reference must document the comparison analysis-error coverage envelope'
 
 $privacy = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot 'PRIVACY.md')
-Assert-That ($privacy -match 'contains no telemetry client' -and $privacy -match 'makes no network requests') 'privacy claims must match the shipping implementation'
+Assert-That ($privacy -match 'contains no telemetry client' -and $privacy -match 'makes no product-owned network requests') 'privacy claims must match the shipping implementation'
 $manifest = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot 'MANIFEST.md')
 Assert-That ($manifest -match 'contains no telemetry client' -and $manifest -match '10\.0\.401') 'manifest privacy and SDK claims must match the shipping implementation'
 Assert-That ($manifest -match '<ref-kind>:<semantic-form>:<canonical-type>' -and $manifest -match 'parses it with Roslyn' -and $manifest -match 'byte-for-byte equality' -and $manifest -match 'recomputes the required form vector' -and $manifest -match 'additive, subtractive, or substituted') 'the manifest contract must document reader-computed canonical parameter forms'
@@ -77,5 +79,12 @@ foreach ($runner in @('ubuntu-latest', 'windows-latest', 'macos-latest')) {
     Assert-That ($ci -match [regex]::Escape($runner)) "CI must run the installed-tool and shipping gates on $runner"
 }
 Assert-That ($ci -match '\./build/validate\.ps1') 'CI must run the repository validation gate on every matrix leg'
+
+$resourceDocs = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot 'docs/PROJECT-ANALYSIS-RESOURCES.md')
+Assert-That ($resourceDocs -match '24 SDK-style' -and $resourceDocs -match '384 source documents' -and $resourceDocs -match '1,536 declarations') 'project-analysis resource documentation must identify the reproducible large fixture'
+Assert-That ($resourceDocs -match '64 C# projects' -and $resourceDocs -match '512 project documents' -and $resourceDocs -match '4,096 source documents') 'project-analysis resource documentation must state the product graph ceilings'
+Assert-That ($resourceDocs -match '120 seconds' -and $resourceDocs -match '1,536 MiB' -and $resourceDocs -match '1,024 MiB') 'project-analysis resource documentation must state the measured CI budget'
+$validation = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot 'build/validate.ps1')
+Assert-That ($validation -match 'Test-ProjectAnalysisResources\.ps1' -and $validation -match 'MaxElapsedSeconds 120') 'release validation must run the project-analysis resource gate'
 
 Write-Host 'Documentation and repository-consistency regression tests passed.'

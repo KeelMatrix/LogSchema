@@ -84,7 +84,7 @@ Intentional changes can be accepted explicitly with repeated `--accept <diagnost
 
 `capture` writes the canonical `logschema.json` (or the path supplied by `--output`). `check` analyzes the current project and compares it with `--baseline`; it never rewrites that file. To update an intentional baseline, run `capture` explicitly, review the diff, and commit the result. `diff` compares two existing manifests offline.
 
-Common options are `--format text|json`, `--severity breaking|warning|all`, `--accept <code>`, `--no-telemetry`, and `--tfm <target-framework>`. The telemetry option is reserved and accepted for script portability. V1 contains no telemetry client and makes no telemetry network requests.
+Common options are `--format text|json`, `--severity breaking|warning|all`, `--accept <code>`, `--no-telemetry`, and `--tfm <target-framework>`. The telemetry option is reserved and accepted for script portability. V1 contains no telemetry client and makes no LogSchema-owned telemetry network requests.
 
 ## CI and exit codes
 
@@ -126,11 +126,13 @@ The stable diagnostic reference is in [COMPATIBILITY-RULES.md](COMPATIBILITY-RUL
 
 ## Cross-platform and SDK support
 
-The public CI workflow validates the built package, local-manifest installation, and installed `capture`, `check`, and `diff` commands on Windows, Linux, and macOS with SDK `10.0.401`. The tool targets `net8.0`, has no OS-specific command syntax, and uses centrally pinned Roslyn/MSBuild dependencies. After the tool and target project's dependencies are restored, LogSchema analysis does not require a network connection.
+The public CI workflow validates the built package, local-manifest installation, and installed `capture`, `check`, and `diff` commands on Windows, Linux, and macOS with SDK `10.0.401`. The tool targets `net8.0`, has no OS-specific command syntax, and uses centrally pinned Roslyn/MSBuild dependencies. After dependencies are restored, LogSchema itself makes no product-owned network requests during `capture`, `check`, or `diff`; `capture` and `check` still invoke MSBuild evaluation, so target projects and their imports or tasks may have their own network behavior.
 
 ## Privacy and security
 
 No source, manifest, path, project identity, or schema content is uploaded. V1 has no telemetry client. LogSchema does not execute target application code and does not read runtime values. Roslyn/MSBuild project evaluation still has the normal trust boundary of the local machine; do not run it on untrusted projects without appropriate isolation. Manifest input is treated as untrusted and is bounded and fail-closed.
+
+Project analysis also fails closed with exit code 3 when an input exceeds 64 C# projects, 512 documents in one project, or 4,096 documents across the input. These are safety ceilings rather than performance promises; the [project-analysis resource gate](docs/PROJECT-ANALYSIS-RESOURCES.md) records the reproducible fixture and measured validation budget.
 
 See the [privacy statement](PRIVACY.md), [security policy](SECURITY.md), and [dependency rationale](docs/DEPENDENCIES.md) for the repository's data and supply-chain boundaries.
 

@@ -10,7 +10,7 @@ Manifests contain developer-selected operational vocabulary, including project a
 
 ## Network behavior
 
-LogSchema itself makes no network requests. Installing or restoring the tool and restoring a target project can contact the package sources configured for the .NET SDK. After those dependencies are available, `capture`, `check`, and `diff` operate locally.
+LogSchema itself makes no product-owned network requests during `capture`, `check`, or `diff` after the required dependencies are available. Installing or restoring the tool and target project can contact the package sources configured for the .NET SDK. `capture` and `check` invoke MSBuild project evaluation, and target projects, imports, or tasks may have their own network behavior; this is a local trust boundary rather than a LogSchema network service. `diff` only reads existing manifests locally.
 
 The `--no-telemetry` option is accepted for script portability. It does not change v1 behavior because no telemetry code is included.
 
