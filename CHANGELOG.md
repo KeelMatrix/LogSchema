@@ -4,6 +4,8 @@ Changes for the KeelMatrix.LogSchema package are recorded here using the Keep a 
 
 ## [Unreleased]
 
+## [0.1.0] - Planned
+
 ### Added
 
 - Deterministic schema-v1 manifests for supported source-generated `LoggerMessage` declarations, with fail-closed canonical event-identity validation.
