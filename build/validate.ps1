@@ -5,6 +5,7 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+. (Join-Path $PSScriptRoot 'Invoke-NestedPwsh.ps1')
 $artifactRoot = Join-Path $repositoryRoot 'artifacts/validation'
 $packageOutput = Join-Path $artifactRoot 'package'
 $repeatPackageOutput = Join-Path $artifactRoot 'package-repeat'
@@ -160,10 +161,10 @@ function Invoke-VulnerabilityAudit {
     $report = (& dotnet package list --project $Project --vulnerable --include-transitive --framework net8.0 --no-restore --config $nugetConfig --format json --output-version 1 2>&1 | Out-String)
     $commandExitCode = $LASTEXITCODE
     $report | Set-Content -LiteralPath $ReportPath -Encoding utf8NoBOM
-    & pwsh -NoProfile -WindowStyle Hidden -NonInteractive -File $vulnerabilityReportValidator `
-        -ReportPath $ReportPath `
-        -ExpectedProjectPath $Project `
-        -CommandExitCode $commandExitCode
+    Invoke-NestedPwsh -ArgumentList @('-NoProfile', '-NonInteractive', '-File', $vulnerabilityReportValidator, `
+        '-ReportPath', $ReportPath, `
+        '-ExpectedProjectPath', $Project, `
+        '-CommandExitCode', [string]$commandExitCode)
     Assert-That ($LASTEXITCODE -eq 0) "vulnerability report validation failed for $Project"
 }
 
@@ -295,11 +296,12 @@ Invoke-Timed 'Vulnerability audit' {
     Invoke-VulnerabilityAudit -Project $coreProject -ReportPath (Join-Path $artifactRoot 'core-vulnerability-report.json')
     Invoke-VulnerabilityAudit -Project $toolProject -ReportPath (Join-Path $artifactRoot 'tool-vulnerability-report.json')
 }
-Invoke-Timed 'Vulnerability audit regression tests' { & pwsh -NoProfile -WindowStyle Hidden -NonInteractive -File (Join-Path $repositoryRoot 'build/Test-VulnerabilityReport.Tests.ps1') }
-Invoke-Timed 'Release contract regression tests' { & pwsh -NoProfile -WindowStyle Hidden -NonInteractive -File (Join-Path $repositoryRoot 'build/Test-ReleaseVersion.Tests.ps1') }
-Invoke-Timed 'Release workflow contract' { & pwsh -NoProfile -WindowStyle Hidden -NonInteractive -File (Join-Path $repositoryRoot 'build/Test-ReleaseWorkflow.ps1') }
-Invoke-Timed 'Pack-safety regression tests' { & pwsh -NoProfile -WindowStyle Hidden -NonInteractive -File (Join-Path $repositoryRoot 'build/Test-PackSafety.ps1') }
-Invoke-Timed 'Documentation and repository consistency' { & pwsh -NoProfile -WindowStyle Hidden -NonInteractive -File (Join-Path $repositoryRoot 'build/Test-Documentation.ps1') }
+Invoke-Timed 'Nested PowerShell launch guard' { Invoke-NestedPwsh -ArgumentList @('-NoProfile', '-NonInteractive', '-File', (Join-Path $repositoryRoot 'build/Test-NestedPwshLaunch.ps1')) }
+Invoke-Timed 'Vulnerability audit regression tests' { Invoke-NestedPwsh -ArgumentList @('-NoProfile', '-NonInteractive', '-File', (Join-Path $repositoryRoot 'build/Test-VulnerabilityReport.Tests.ps1')) }
+Invoke-Timed 'Release contract regression tests' { Invoke-NestedPwsh -ArgumentList @('-NoProfile', '-NonInteractive', '-File', (Join-Path $repositoryRoot 'build/Test-ReleaseVersion.Tests.ps1')) }
+Invoke-Timed 'Release workflow contract' { Invoke-NestedPwsh -ArgumentList @('-NoProfile', '-NonInteractive', '-File', (Join-Path $repositoryRoot 'build/Test-ReleaseWorkflow.ps1')) }
+Invoke-Timed 'Pack-safety regression tests' { Invoke-NestedPwsh -ArgumentList @('-NoProfile', '-NonInteractive', '-File', (Join-Path $repositoryRoot 'build/Test-PackSafety.ps1')) }
+Invoke-Timed 'Documentation and repository consistency' { Invoke-NestedPwsh -ArgumentList @('-NoProfile', '-NonInteractive', '-File', (Join-Path $repositoryRoot 'build/Test-Documentation.ps1')) }
 Invoke-Timed 'Line-ending contract' {
     $trackedFiles = @(git -C $repositoryRoot ls-files)
     Assert-That ($LASTEXITCODE -eq 0) 'git must enumerate tracked files for the line-ending check'
@@ -322,16 +324,16 @@ Invoke-Timed 'Line-ending contract' {
 }
 Invoke-Timed 'Format and analyzer validation' { dotnet format $solution --no-restore --verify-no-changes --verbosity minimal }
 Invoke-Timed 'Release build' { dotnet build $solution -c Release --no-restore @msbuildVersionArgument --nologo }
-Invoke-Timed 'Pinned generator state grounding' { & pwsh -NoProfile -WindowStyle Hidden -NonInteractive -File (Join-Path $repositoryRoot 'build/Test-GeneratorStateGrounding.ps1') -RepositoryRoot $repositoryRoot }
+Invoke-Timed 'Pinned generator state grounding' { Invoke-NestedPwsh -ArgumentList @('-NoProfile', '-NonInteractive', '-File', (Join-Path $repositoryRoot 'build/Test-GeneratorStateGrounding.ps1'), '-RepositoryRoot', $repositoryRoot) }
 Invoke-Timed 'Unit and contract tests' { dotnet test (Join-Path $repositoryRoot 'tests/KeelMatrix.LogSchema.Tests/KeelMatrix.LogSchema.Tests.csproj') -c Release --no-build --no-restore --nologo }
-Invoke-Timed 'Phase 0 regression matrix' { & pwsh -NoProfile -WindowStyle Hidden -NonInteractive -File (Join-Path $repositoryRoot 'build/Test-Phase0Matrix.ps1') }
-Invoke-Timed 'Shipping semantic fixture matrix' { & pwsh -NoProfile -WindowStyle Hidden -NonInteractive -File (Join-Path $repositoryRoot 'build/Test-ShippingMatrix.ps1') -RepositoryRoot $repositoryRoot }
+Invoke-Timed 'Phase 0 regression matrix' { Invoke-NestedPwsh -ArgumentList @('-NoProfile', '-NonInteractive', '-File', (Join-Path $repositoryRoot 'build/Test-Phase0Matrix.ps1')) }
+Invoke-Timed 'Shipping semantic fixture matrix' { Invoke-NestedPwsh -ArgumentList @('-NoProfile', '-NonInteractive', '-File', (Join-Path $repositoryRoot 'build/Test-ShippingMatrix.ps1'), '-RepositoryRoot', $repositoryRoot) }
 Invoke-Timed 'Project-analysis resource and bounded-failure gate' {
-    & pwsh -NoProfile -WindowStyle Hidden -NonInteractive -File (Join-Path $repositoryRoot 'build/Test-ProjectAnalysisResources.ps1') `
-        -RepositoryRoot $repositoryRoot `
-        -MaxElapsedSeconds 120 `
-        -MaxWorkingSetMiB 1536 `
-        -MaxPrivateMemoryMiB 1024
+    Invoke-NestedPwsh -ArgumentList @('-NoProfile', '-NonInteractive', '-File', (Join-Path $repositoryRoot 'build/Test-ProjectAnalysisResources.ps1'), `
+        '-RepositoryRoot', $repositoryRoot, `
+        '-MaxElapsedSeconds', '120', `
+        '-MaxWorkingSetMiB', '1536', `
+        '-MaxPrivateMemoryMiB', '1024')
     Assert-That ($LASTEXITCODE -eq 0) 'the project-analysis resource gate must pass'
 }
 
@@ -579,17 +581,17 @@ Invoke-Timed 'Pack and inspect' {
 }
 
 Invoke-Timed 'Attached/detached package reproducibility' {
-    & pwsh -NoProfile -WindowStyle Hidden -NonInteractive -File (Join-Path $repositoryRoot 'build/Test-PackageReproducibility.ps1') -RepositoryRoot $repositoryRoot -ReleaseVersion $packageVersion
+    Invoke-NestedPwsh -ArgumentList @('-NoProfile', '-NonInteractive', '-File', (Join-Path $repositoryRoot 'build/Test-PackageReproducibility.ps1'), '-RepositoryRoot', $repositoryRoot, '-ReleaseVersion', $packageVersion)
     Assert-That ($LASTEXITCODE -eq 0) 'attached/detached package reproducibility regression must pass'
 }
 
 Invoke-Timed 'Isolated local-manifest onboarding and installed-tool smoke' {
-    & pwsh -NoProfile -WindowStyle Hidden -NonInteractive -File (Join-Path $repositoryRoot 'build/Test-LocalToolSmoke.ps1') `
-        -PackagePath (Join-Path $packageOutput $expectedPackageName) `
-        -PackageId $packageId `
-        -PackageVersion $packageVersion `
-        -ConsumerFixture $consumerFixture `
-        -WorkRoot $smokeRoot
+    Invoke-NestedPwsh -ArgumentList @('-NoProfile', '-NonInteractive', '-File', (Join-Path $repositoryRoot 'build/Test-LocalToolSmoke.ps1'), `
+        '-PackagePath', (Join-Path $packageOutput $expectedPackageName), `
+        '-PackageId', $packageId, `
+        '-PackageVersion', $packageVersion, `
+        '-ConsumerFixture', $consumerFixture, `
+        '-WorkRoot', $smokeRoot)
     Assert-That ($LASTEXITCODE -eq 0) 'the local-manifest installed-tool smoke must pass'
 }
 

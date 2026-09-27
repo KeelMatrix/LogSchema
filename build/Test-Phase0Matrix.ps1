@@ -6,6 +6,7 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
+. (Join-Path $PSScriptRoot 'Invoke-NestedPwsh.ps1')
 $probe = Join-Path $repositoryRoot "phase0/bin/$Configuration/net10.0/Phase0.LogSchemaProbe.dll"
 $artifactRoot = Join-Path $repositoryRoot 'artifacts/matrix-test'
 
@@ -156,7 +157,7 @@ Assert-That ($buildExitCode -eq 0 -and (Test-Path -LiteralPath $sentinelAssembly
 
 $timer = [System.Diagnostics.Stopwatch]::StartNew()
 $sentinelScript = "try { `$assembly = [System.Reflection.Assembly]::LoadFrom('$sentinelAssembly'); `$type = `$assembly.GetType('Phase0.Sentinel.ExecutionSentinel'); `$type.GetMethod('Touch', [System.Reflection.BindingFlags] 'NonPublic,Static').Invoke(`$null, `$null) | Out-Null } catch { Write-Output `$_.Exception.InnerException.InnerException.Message; exit 17 }"
-$sentinelOutput = & pwsh -NoProfile -WindowStyle Hidden -NonInteractive -Command $sentinelScript 2>&1 | Out-String
+$sentinelOutput = Invoke-NestedPwsh -ArgumentList @('-NoProfile', '-NonInteractive', '-Command', $sentinelScript) 2>&1 | Out-String
 $sentinelExitCode = $LASTEXITCODE
 $timer.Stop()
 Write-Host ("Controlled sentinel load: {0:N2}s" -f $timer.Elapsed.TotalSeconds)

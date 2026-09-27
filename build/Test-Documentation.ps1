@@ -85,6 +85,7 @@ Assert-That ($resourceDocs -match '24 SDK-style' -and $resourceDocs -match '384 
 Assert-That ($resourceDocs -match '64 C# projects' -and $resourceDocs -match '512 project documents' -and $resourceDocs -match '4,096 source documents') 'project-analysis resource documentation must state the product graph ceilings'
 Assert-That ($resourceDocs -match '120 seconds' -and $resourceDocs -match '1,536 MiB' -and $resourceDocs -match '1,024 MiB') 'project-analysis resource documentation must state the measured CI budget'
 $validation = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot 'build/validate.ps1')
-Assert-That ($validation -match 'Test-ProjectAnalysisResources\.ps1' -and $validation -match 'MaxElapsedSeconds 120') 'release validation must run the project-analysis resource gate'
+$hasResourceBudget = $validation -match 'MaxElapsedSeconds 120' -or $validation -match "'-MaxElapsedSeconds', '120'"
+Assert-That ($validation -match 'Test-ProjectAnalysisResources\.ps1' -and $hasResourceBudget) 'release validation must run the project-analysis resource gate'
 
 Write-Host 'Documentation and repository-consistency regression tests passed.'
