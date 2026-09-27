@@ -1,4 +1,7 @@
 using System.Globalization;
+using System.Text;
+using System.Text.RegularExpressions;
+using System.Xml;
 using Microsoft.Build.Locator;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -22,6 +25,9 @@ internal sealed class LogSchemaExtractor
         {
             throw new ProjectAnalysisException("The project or solution file was not found.");
         }
+
+        var budget = new ProjectAnalysisBudget();
+        await ProjectAnalysisPreflight.ValidateAsync(fullPath, budget, cancellationToken);
 
         if (!MSBuildLocator.IsRegistered)
         {
@@ -65,24 +71,16 @@ internal sealed class LogSchemaExtractor
             throw new ProjectAnalysisException("Project load failed: no C# projects were found.");
         }
 
-        if (projects.Length > ProjectAnalysisLimits.MaxProjects)
-        {
-            throw new ProjectAnalysisException(ProjectAnalysisLimits.ProjectCountMessage(projects.Length));
-        }
+        budget.ObserveProjectCount(projects.Length);
 
-        var totalDocuments = 0;
         foreach (var project in projects)
         {
-            var documentCount = project.Documents.Count();
-            if (documentCount > ProjectAnalysisLimits.MaxDocumentsPerProject)
+            budget.BeginProject();
+            foreach (var document in project.Documents)
             {
-                throw new ProjectAnalysisException(ProjectAnalysisLimits.ProjectDocumentCountMessage(project.Name, documentCount));
-            }
-
-            totalDocuments += documentCount;
-            if (totalDocuments > ProjectAnalysisLimits.MaxDocuments)
-            {
-                throw new ProjectAnalysisException(ProjectAnalysisLimits.TotalDocumentCountMessage(totalDocuments));
+                cancellationToken.ThrowIfCancellationRequested();
+                var sourceBytes = await GetSourceDocumentBytesAsync(document, cancellationToken);
+                budget.ObserveSourceDocument(sourceBytes);
             }
         }
 
@@ -121,7 +119,7 @@ internal sealed class LogSchemaExtractor
             }
 
             allProjects.Add(identity);
-            var analyzer = new ProjectExtractor(project, compilation, identity);
+            var analyzer = new ProjectExtractor(project, compilation, identity, budget);
             var result = await analyzer.ExtractAsync(cancellationToken);
             allEvents.AddRange(result.Events.Select(@event => @event with { ProjectKey = projectKey }));
             allUnsupported.AddRange(result.Unsupported.Select(item => item with { ProjectKey = projectKey }));
@@ -164,6 +162,136 @@ internal sealed class LogSchemaExtractor
             workspaceDiagnostics).Canonicalize();
     }
 
+    private static async Task<long> GetSourceDocumentBytesAsync(Document document, CancellationToken cancellationToken)
+    {
+        if (!string.IsNullOrWhiteSpace(document.FilePath))
+        {
+            try
+            {
+                var fileInfo = new FileInfo(document.FilePath);
+                if (fileInfo.Exists)
+                {
+                    return fileInfo.Length;
+                }
+            }
+            catch (Exception exception) when (exception is ArgumentException or IOException or NotSupportedException or UnauthorizedAccessException or System.Security.SecurityException)
+            {
+                // Fall back to the workspace text. The workspace still owns
+                // the source identity and can provide a bounded text object.
+            }
+        }
+
+        var text = await document.GetTextAsync(cancellationToken);
+        if (text.Length > ProjectAnalysisLimits.MaxSourceBytesPerDocument)
+        {
+            throw new ProjectAnalysisException(ProjectAnalysisLimits.SourceDocumentBytesMessage(text.Length));
+        }
+
+        return Encoding.UTF8.GetByteCount(text.ToString());
+    }
+
+    private static class ProjectAnalysisPreflight
+    {
+        private static readonly Regex SolutionProjectLine = new(
+            "^Project\\(\\\"[^\\\"]+\\\"\\)\\s*=\\s*\\\"[^\\\"]*\\\",\\s*\\\"(?<path>[^\\\"]+)\\\"",
+            RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+        internal static async Task ValidateAsync(string inputPath, ProjectAnalysisBudget budget, CancellationToken cancellationToken)
+        {
+            var extension = Path.GetExtension(inputPath);
+            if (extension.Equals(".sln", StringComparison.OrdinalIgnoreCase))
+            {
+                var fileLength = new FileInfo(inputPath).Length;
+                if (fileLength > ProjectAnalysisLimits.MaxSolutionFileBytes)
+                {
+                    throw new ProjectAnalysisException(ProjectAnalysisLimits.SolutionFileBytesMessage(fileLength));
+                }
+
+                var projectCount = await CountSlnProjectsAsync(inputPath, cancellationToken);
+                if (projectCount > 0)
+                {
+                    budget.ObserveProjectCount(projectCount);
+                }
+            }
+            else if (extension.Equals(".slnx", StringComparison.OrdinalIgnoreCase))
+            {
+                var fileLength = new FileInfo(inputPath).Length;
+                if (fileLength > ProjectAnalysisLimits.MaxSolutionFileBytes)
+                {
+                    throw new ProjectAnalysisException(ProjectAnalysisLimits.SolutionFileBytesMessage(fileLength));
+                }
+
+                var projectCount = await CountSlnxProjectsAsync(inputPath, cancellationToken);
+                if (projectCount > 0)
+                {
+                    budget.ObserveProjectCount(projectCount);
+                }
+            }
+            else
+            {
+                budget.ObserveProjectCount(1);
+            }
+        }
+
+        private static async Task<int> CountSlnProjectsAsync(string path, CancellationToken cancellationToken)
+        {
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 64 * 1024, useAsync: true);
+            using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+            var count = 0;
+            while (await reader.ReadLineAsync(cancellationToken) is { } line)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var match = SolutionProjectLine.Match(line);
+                if (!match.Success || !match.Groups["path"].Value.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                count++;
+                if (count > ProjectAnalysisLimits.MaxProjects)
+                {
+                    throw new ProjectAnalysisException(ProjectAnalysisLimits.ProjectCountMessage(count));
+                }
+            }
+
+            return count;
+        }
+
+        private static async Task<int> CountSlnxProjectsAsync(string path, CancellationToken cancellationToken)
+        {
+            var settings = new XmlReaderSettings
+            {
+                Async = true,
+                DtdProcessing = DtdProcessing.Prohibit,
+                MaxCharactersInDocument = ProjectAnalysisLimits.MaxSolutionFileBytes
+            };
+            using var reader = XmlReader.Create(path, settings);
+            var count = 0;
+            while (await reader.ReadAsync())
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (reader.NodeType != XmlNodeType.Element || !reader.LocalName.Equals("Project", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                var projectPath = reader.GetAttribute("Path");
+                if (projectPath is null || !projectPath.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                count++;
+                if (count > ProjectAnalysisLimits.MaxProjects)
+                {
+                    throw new ProjectAnalysisException(ProjectAnalysisLimits.ProjectCountMessage(count));
+                }
+            }
+
+            return count;
+        }
+    }
+
     private sealed class ProjectExtractor
     {
         private readonly Project project;
@@ -178,13 +306,15 @@ internal sealed class LogSchemaExtractor
         private readonly SourceProvenanceRegistry sourceProvenance = new();
         private readonly HashSet<string> reportedProvenanceCollisions = new(StringComparer.Ordinal);
         private readonly string projectDirectory;
+        private readonly ProjectAnalysisBudget budget;
         private bool hasLoggerMessageDeclaration;
 
-        internal ProjectExtractor(Project project, Compilation compilation, ProjectIdentity projectIdentity)
+        internal ProjectExtractor(Project project, Compilation compilation, ProjectIdentity projectIdentity, ProjectAnalysisBudget budget)
         {
             this.project = project;
             this.compilation = compilation;
             this.projectIdentity = projectIdentity;
+            this.budget = budget;
             projectDirectory = Path.GetDirectoryName(Path.GetFullPath(project.FilePath ?? throw new ProjectAnalysisException("Project path is required.")))!;
         }
 
@@ -202,14 +332,41 @@ internal sealed class LogSchemaExtractor
                 }
             }
 
-            foreach (var tree in compilation.SyntaxTrees.OrderBy(tree => SourceProvenance.NormalizeGeneratedPath(tree.FilePath, tree.GetText(cancellationToken).ToString()), StringComparer.Ordinal))
+            var syntaxTrees = compilation.SyntaxTrees.ToArray();
+            budget.ObserveSyntaxTrees(syntaxTrees.Length);
+            var generatedTrees = new List<GeneratedSyntaxTree>();
+            foreach (var tree in syntaxTrees)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 if (!scannedTrees.Add(tree))
                 {
                     continue;
                 }
-                Scan(tree.GetRoot(cancellationToken), compilation.GetSemanticModel(tree), tree.FilePath, false, tree);
+
+                budget.ObserveGeneratedSyntaxTree();
+                var text = tree.GetText(cancellationToken);
+                if (text.Length > ProjectAnalysisLimits.MaxGeneratedSourceBytesPerTree)
+                {
+                    throw new ProjectAnalysisException(ProjectAnalysisLimits.GeneratedTreeBytesMessage(text.Length));
+                }
+
+                var generatedText = text.ToString();
+                var generatedBytes = (text.Encoding ?? Encoding.UTF8).GetByteCount(generatedText);
+                budget.ObserveGeneratedSourceBytes(generatedBytes);
+                var logicalPath = SourceProvenance.NormalizeGeneratedPath(tree.FilePath, generatedText);
+                generatedTrees.Add(new GeneratedSyntaxTree(tree, logicalPath));
+            }
+
+            foreach (var generatedTree in generatedTrees.OrderBy(tree => tree.LogicalPath, StringComparer.Ordinal))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                Scan(
+                    generatedTree.Tree.GetRoot(cancellationToken),
+                    compilation.GetSemanticModel(generatedTree.Tree),
+                    generatedTree.Tree.FilePath,
+                    false,
+                    generatedTree.Tree,
+                    generatedTree.LogicalPath);
             }
 
             foreach (var pair in sourceDeclarations.Where(pair => pair.Value.Count > 1).OrderBy(pair => pair.Key, StringComparer.Ordinal))
@@ -258,11 +415,18 @@ internal sealed class LogSchemaExtractor
             return new ProjectExtractionResult(events, unsupported, analysisIssues, diagnostics);
         }
 
-        private void Scan(SyntaxNode root, SemanticModel model, string? filePath, bool isProjectSource, SyntaxTree syntaxTree)
+        private void Scan(
+            SyntaxNode root,
+            SemanticModel model,
+            string? filePath,
+            bool isProjectSource,
+            SyntaxTree syntaxTree,
+            string? generatedLogicalPath = null,
+            string? generatedText = null)
         {
             var logicalPath = isProjectSource
                 ? SourceProvenance.NormalizeProjectRelativePath(projectDirectory, filePath ?? string.Empty)
-                : SourceProvenance.NormalizeGeneratedPath(filePath, syntaxTree.GetText().ToString());
+                : generatedLogicalPath ?? SourceProvenance.NormalizeGeneratedPath(filePath, generatedText);
             if (!sourceProvenance.TryRegister(isProjectSource ? "source" : "generated", logicalPath, syntaxTree) && reportedProvenanceCollisions.Add(logicalPath))
             {
                 analysisIssues.Add(new AnalysisIssue(
@@ -283,6 +447,7 @@ internal sealed class LogSchemaExtractor
                     continue;
                 }
 
+                budget.ObserveLoggerMessageDeclaration();
                 hasLoggerMessageDeclaration |= isProjectSource;
 
                 var source = new SourceLocation(logicalPath, methodSyntax.GetLocation().GetLineSpan().StartLinePosition.Line + 1, isProjectSource ? "source" : "generated");
@@ -319,11 +484,18 @@ internal sealed class LogSchemaExtractor
                     continue;
                 }
 
+                budget.ObserveEvent();
                 events.Add(contract!);
             }
         }
 
-        private void AddUnsupported(SourceLocation source, MethodDeclarationSyntax syntax, string declarationKey, string reason) => unsupported.Add(new UnsupportedDeclaration(projectIdentity.Key, source, NormalizeDeclaration(syntax.ToString()), declarationKey, reason));
+        private void AddUnsupported(SourceLocation source, MethodDeclarationSyntax syntax, string declarationKey, string reason)
+        {
+            budget.ObserveUnsupportedDeclaration();
+            unsupported.Add(new UnsupportedDeclaration(projectIdentity.Key, source, NormalizeDeclaration(syntax.ToString()), declarationKey, reason));
+        }
+
+        private sealed record GeneratedSyntaxTree(SyntaxTree Tree, string LogicalPath);
 
     }
 

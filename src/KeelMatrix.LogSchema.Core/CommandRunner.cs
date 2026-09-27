@@ -307,6 +307,16 @@ Exit codes:
   2 invalid invocation or configuration
   3 project-load or analysis failure, including zero supported events
 
+Analysis budget:
+  Project inputs are bounded to 64 C# projects, 512 source documents per project,
+  4,096 source documents total, 1 MiB per source document, 16 MiB source per
+  project, 64 MiB source total, and 16 MiB per .sln/.slnx preflight file. Each
+  compilation is bounded to 8,192 syntax trees, 4,096 generated trees,
+  4 MiB generated text per tree, 64 MiB generated text total, and 4,096 discovered
+  declarations, events, or unsupported declarations. Exceeding any ceiling returns
+  exit 3 as Project analysis resource limit exceeded. MSBuild evaluation remains a
+  local trust boundary and is not sandboxed or absolutely bounded by these checks.
+
 Compatibility summary:
   BREAKING EventId/EventName changes, structured-state removal/rename/order changes, and parameter-role changes (default gate).
   WARNING  Fixed/dynamic or named LogLevel changes (use --severity warning to gate).

@@ -171,6 +171,156 @@ function New-DocumentCountFixture {
     return $projectPath
 }
 
+function New-PaddedSourceFile {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][int64]$ByteCount,
+        [Parameter(Mandatory = $true)][string]$Prefix
+    )
+
+    $encoding = [Text.UTF8Encoding]::new($false)
+    $fixedCommentBytes = $encoding.GetByteCount('/*') + $encoding.GetByteCount('*/')
+    $paddingLength = $ByteCount - $encoding.GetByteCount($Prefix) - $fixedCommentBytes
+    Assert-That ($paddingLength -ge 0) "cannot create a $ByteCount-byte source file from the requested prefix"
+    Write-Utf8File -Path $Path -Content ($Prefix + '/*' + [string]::new('x', [int]$paddingLength) + '*/')
+    Assert-That ((Get-Item -LiteralPath $Path).Length -eq $ByteCount) "source fixture was not exactly $ByteCount bytes"
+}
+
+function New-SourceByteFixture {
+    param(
+        [Parameter(Mandatory = $true)][string]$Root,
+        [Parameter(Mandatory = $true)][int64]$ByteCount
+    )
+
+    $projectDirectory = Join-Path $Root 'SourceBytes'
+    $projectPath = Join-Path $projectDirectory 'SourceBytes.csproj'
+    Write-Utf8File -Path $projectPath -Content @"
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.1" />
+  </ItemGroup>
+</Project>
+"@
+    $prefix = @"
+using Microsoft.Extensions.Logging;
+public static partial class SourceBytesLogging
+{
+    [LoggerMessage(EventId = 1, Level = LogLevel.Information, Message = "Source bytes {Value}")]
+    public static partial void Event(ILogger logger, int value);
+}
+"@
+    New-PaddedSourceFile -Path (Join-Path $projectDirectory 'Logging.cs') -ByteCount $ByteCount -Prefix $prefix
+    return $projectPath
+}
+
+function New-SourceTotalFixture {
+    param(
+        [Parameter(Mandatory = $true)][string]$Root,
+        [Parameter(Mandatory = $true)][int]$ProjectCount,
+        [Parameter(Mandatory = $true)][int]$DocumentsPerProject,
+        [Parameter(Mandatory = $true)][int64]$BytesPerDocument
+    )
+
+    $projectPaths = [Collections.Generic.List[string]]::new()
+    for ($projectIndex = 1; $projectIndex -le $ProjectCount; $projectIndex++) {
+        $projectName = 'SourceTotal{0:D2}' -f $projectIndex
+        $projectDirectory = Join-Path $Root $projectName
+        $projectPath = Join-Path $projectDirectory "$projectName.csproj"
+        $projectPaths.Add("$projectName/$projectName.csproj")
+        Write-Utf8File -Path $projectPath -Content @"
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+</Project>
+"@
+        for ($documentIndex = 1; $documentIndex -le $DocumentsPerProject; $documentIndex++) {
+            $prefix = "namespace SourceTotal.$projectName;`npublic sealed class Document${projectIndex}_${documentIndex} { }`n"
+            New-PaddedSourceFile -Path (Join-Path $projectDirectory ("Document{0:D2}.cs" -f $documentIndex)) -ByteCount $BytesPerDocument -Prefix $prefix
+        }
+    }
+
+    return New-SolutionFile -Root $Root -Name 'SourceTotal' -ProjectPaths $projectPaths
+}
+
+function New-GeneratedTreeFixture {
+    param(
+        [Parameter(Mandatory = $true)][string]$Root,
+        [Parameter(Mandatory = $true)][string]$GeneratorProject,
+        [Parameter(Mandatory = $true)][int]$TreeCount,
+        [Parameter(Mandatory = $true)][int]$TreeSize
+    )
+
+    $projectDirectory = Join-Path $Root 'GeneratedTrees'
+    $projectPath = Join-Path $projectDirectory 'GeneratedTrees.csproj'
+    Write-Utf8File -Path $projectPath -Content @"
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
+    <LogSchemaGeneratedTreeCount>$TreeCount</LogSchemaGeneratedTreeCount>
+    <LogSchemaGeneratedTreeSize>$TreeSize</LogSchemaGeneratedTreeSize>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.1" />
+    <ProjectReference Include="$GeneratorProject" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+    <CompilerVisibleProperty Include="LogSchemaGeneratedTreeCount" />
+    <CompilerVisibleProperty Include="LogSchemaGeneratedTreeSize" />
+  </ItemGroup>
+</Project>
+"@
+    Write-Utf8File -Path (Join-Path $projectDirectory 'Logging.cs') -Content @"
+using Microsoft.Extensions.Logging;
+public static partial class GeneratedTreesLogging
+{
+    [LoggerMessage(EventId = 1, Level = LogLevel.Information, Message = "Generated trees {Value}")]
+    public static partial void Event(ILogger logger, int value);
+}
+"@
+    return $projectPath
+}
+
+function New-DeclarationCountFixture {
+    param(
+        [Parameter(Mandatory = $true)][string]$Root,
+        [Parameter(Mandatory = $true)][int]$DeclarationCount
+    )
+
+    $projectDirectory = Join-Path $Root 'Declarations'
+    $projectPath = Join-Path $projectDirectory 'Declarations.csproj'
+    Write-Utf8File -Path $projectPath -Content @"
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.1" />
+  </ItemGroup>
+</Project>
+"@
+    $source = [Collections.Generic.List[string]]::new()
+    $source.Add('using Microsoft.Extensions.Logging;')
+    $source.Add('public static partial class DeclarationLogging {')
+    $source.Add('    [LoggerMessage(EventId = 1, Level = LogLevel.Information, Message = "Supported {Value}")]')
+    $source.Add('    public static partial void Supported(ILogger logger, int value);')
+    for ($index = 1; $index -lt $DeclarationCount; $index++) {
+        $source.Add("    [LoggerMessage(EventId = $($index + 1), Level = LogLevel.Information, Message = `"Unsupported $index`")]")
+        $source.Add("    public static void Unsupported$index(ILogger logger) { }")
+    }
+    $source.Add('}')
+    Write-Utf8File -Path (Join-Path $projectDirectory 'Logging.cs') -Content (($source -join "`n") + "`n")
+    return $projectPath
+}
+
 function Restore-Fixture {
     param(
         [Parameter(Mandatory = $true)][string]$SolutionOrProject,
@@ -231,6 +381,24 @@ function Invoke-TrackedProcess {
     }
 }
 
+function Assert-BoundedAnalysisFailure {
+    param(
+        [Parameter(Mandatory = $true)]$Result,
+        [Parameter(Mandatory = $true)][string]$Label,
+        [Parameter(Mandatory = $true)][string]$ResourceText
+    )
+
+    $output = $Result.Stdout + $Result.Stderr
+    Assert-That (-not $Result.TimedOut) "$Label must fail without timing out"
+    Assert-That ($Result.ExitCode -eq 3) "$Label must return analysis failure exit 3"
+    Assert-That ($output -match 'Project analysis resource limit exceeded') "$Label must report the shared resource-limit family"
+    Assert-That ($output -match [regex]::Escape($ResourceText)) "$Label must identify the exceeded $ResourceText ceiling"
+    Assert-That ($output -match 'ANALYSIS ERROR') "$Label must use the analysis-error diagnostic envelope"
+    Assert-That ($output -notmatch '(?m)^\s*at\s+') "$Label must not print a stack trace"
+    Assert-That ($output -notmatch [regex]::Escape($repositoryRoot)) "$Label must not print a machine path"
+    Write-Host ("{0}: exit={1} elapsed={2:N2}s peakWorkingSet={3:N1}MiB" -f $Label, $Result.ExitCode, $Result.ElapsedSeconds, $Result.PeakWorkingSetMiB)
+}
+
 function Assert-ResourceBudget {
     param([Parameter(Mandatory = $true)]$Result)
 
@@ -263,19 +431,48 @@ Write-Host ("Large project-analysis fixture: projects={0} documents={1} declarat
 $tooManyProjectRoot = Join-Path $artifactRoot 'too-many-projects'
 $tooManyProjects = New-ProjectCountFixture -Root $tooManyProjectRoot -ProjectCount 65
 Restore-Fixture -SolutionOrProject $tooManyProjects -NuGetConfig $nugetConfig
-$tooManyProjectResult = Invoke-TrackedProcess -FileName 'dotnet' -Arguments @($tool, 'capture', $tooManyProjects, '--format', 'json', '--no-telemetry') -TimeoutSeconds 120
-Assert-That (-not $tooManyProjectResult.TimedOut) 'too-many-projects regression must fail without timing out'
-Assert-That ($tooManyProjectResult.ExitCode -eq 3) 'too-many-projects regression must return analysis failure exit 3'
-Assert-That (($tooManyProjectResult.Stdout + $tooManyProjectResult.Stderr) -match 'Project analysis resource limit exceeded') 'too-many-projects regression must report a clear resource-limit error'
-Write-Host ("Pathological project graph: exit={0} elapsed={1:N2}s peakWorkingSet={2:N1}MiB" -f $tooManyProjectResult.ExitCode, $tooManyProjectResult.ElapsedSeconds, $tooManyProjectResult.PeakWorkingSetMiB)
+$tooManyProjectResult = Invoke-TrackedProcess -FileName 'dotnet' -Arguments @($tool, 'capture', $tooManyProjects, '--output', (Join-Path $tooManyProjectRoot 'manifest.json'), '--no-telemetry') -TimeoutSeconds 120
+Assert-BoundedAnalysisFailure -Result $tooManyProjectResult -Label '65-project preflight' -ResourceText 'C# projects'
 
 $tooManyDocumentRoot = Join-Path $artifactRoot 'too-many-documents'
 $tooManyDocuments = New-DocumentCountFixture -Root $tooManyDocumentRoot -DocumentCount 513
 Restore-Fixture -SolutionOrProject $tooManyDocuments -NuGetConfig $nugetConfig
-$tooManyDocumentResult = Invoke-TrackedProcess -FileName 'dotnet' -Arguments @($tool, 'capture', $tooManyDocuments, '--format', 'json', '--no-telemetry') -TimeoutSeconds 120
-Assert-That (-not $tooManyDocumentResult.TimedOut) 'too-many-documents regression must fail without timing out'
-Assert-That ($tooManyDocumentResult.ExitCode -eq 3) 'too-many-documents regression must return analysis failure exit 3'
-Assert-That (($tooManyDocumentResult.Stdout + $tooManyDocumentResult.Stderr) -match 'Project analysis resource limit exceeded') 'too-many-documents regression must report a clear resource-limit error'
-Write-Host ("Pathological source graph: exit={0} elapsed={1:N2}s peakWorkingSet={2:N1}MiB" -f $tooManyDocumentResult.ExitCode, $tooManyDocumentResult.ElapsedSeconds, $tooManyDocumentResult.PeakWorkingSetMiB)
+$tooManyDocumentResult = Invoke-TrackedProcess -FileName 'dotnet' -Arguments @($tool, 'capture', $tooManyDocuments, '--output', (Join-Path $tooManyDocumentRoot 'manifest.json'), '--no-telemetry') -TimeoutSeconds 120
+Assert-BoundedAnalysisFailure -Result $tooManyDocumentResult -Label '513-document preflight' -ResourceText 'source documents in one project'
+
+$oneMiB = 1MB
+$sourceByteRoot = Join-Path $artifactRoot 'too-large-source-document'
+$tooLargeSource = New-SourceByteFixture -Root $sourceByteRoot -ByteCount ($oneMiB + 1)
+Restore-Fixture -SolutionOrProject $tooLargeSource -NuGetConfig $nugetConfig
+$tooLargeSourceResult = Invoke-TrackedProcess -FileName 'dotnet' -Arguments @($tool, 'capture', $tooLargeSource, '--output', (Join-Path $sourceByteRoot 'manifest.json'), '--no-telemetry') -TimeoutSeconds 120
+Assert-BoundedAnalysisFailure -Result $tooLargeSourceResult -Label 'oversized source document (N+1)' -ResourceText 'source bytes in one document'
+
+$sourceTotalRoot = Join-Path $artifactRoot 'too-large-source-total'
+$sourceTotal = New-SourceTotalFixture -Root $sourceTotalRoot -ProjectCount 5 -DocumentsPerProject 13 -BytesPerDocument $oneMiB
+Restore-Fixture -SolutionOrProject $sourceTotal -NuGetConfig $nugetConfig
+$sourceTotalResult = Invoke-TrackedProcess -FileName 'dotnet' -Arguments @($tool, 'capture', $sourceTotal, '--output', (Join-Path $sourceTotalRoot 'manifest.json'), '--no-telemetry') -TimeoutSeconds 120
+Assert-BoundedAnalysisFailure -Result $sourceTotalResult -Label 'source-byte total overage' -ResourceText 'source bytes across the input'
+
+$generatorProject = Join-Path $repositoryRoot 'fixtures/Phase0.GeneratedDeclarationGenerator/Phase0.GeneratedDeclarationGenerator.csproj'
+& dotnet build $generatorProject -c Debug --no-restore --nologo | Out-Null
+Assert-That ($LASTEXITCODE -eq 0) 'the generated-tree resource fixture generator must build'
+
+$generatedTreeRoot = Join-Path $artifactRoot 'too-many-generated-trees'
+$tooManyGeneratedTrees = New-GeneratedTreeFixture -Root $generatedTreeRoot -GeneratorProject $generatorProject -TreeCount 4097 -TreeSize 0
+Restore-Fixture -SolutionOrProject $tooManyGeneratedTrees -NuGetConfig $nugetConfig
+$tooManyGeneratedTreesResult = Invoke-TrackedProcess -FileName 'dotnet' -Arguments @($tool, 'capture', $tooManyGeneratedTrees, '--output', (Join-Path $generatedTreeRoot 'manifest.json'), '--no-telemetry') -TimeoutSeconds 120
+Assert-BoundedAnalysisFailure -Result $tooManyGeneratedTreesResult -Label 'generated-tree count (N+1)' -ResourceText 'generated syntax trees in one project'
+
+$largeGeneratedTreeRoot = Join-Path $artifactRoot 'too-large-generated-tree'
+$largeGeneratedTree = New-GeneratedTreeFixture -Root $largeGeneratedTreeRoot -GeneratorProject $generatorProject -TreeCount 1 -TreeSize (4MB + 1)
+Restore-Fixture -SolutionOrProject $largeGeneratedTree -NuGetConfig $nugetConfig
+$largeGeneratedTreeResult = Invoke-TrackedProcess -FileName 'dotnet' -Arguments @($tool, 'capture', $largeGeneratedTree, '--output', (Join-Path $largeGeneratedTreeRoot 'manifest.json'), '--no-telemetry') -TimeoutSeconds 120
+Assert-BoundedAnalysisFailure -Result $largeGeneratedTreeResult -Label 'generated-tree text (N+1)' -ResourceText 'generated source bytes in one syntax tree'
+
+$declarationRoot = Join-Path $artifactRoot 'too-many-declarations'
+$tooManyDeclarations = New-DeclarationCountFixture -Root $declarationRoot -DeclarationCount 4097
+Restore-Fixture -SolutionOrProject $tooManyDeclarations -NuGetConfig $nugetConfig
+$tooManyDeclarationsResult = Invoke-TrackedProcess -FileName 'dotnet' -Arguments @($tool, 'capture', $tooManyDeclarations, '--output', (Join-Path $declarationRoot 'manifest.json'), '--no-telemetry') -TimeoutSeconds 120
+Assert-BoundedAnalysisFailure -Result $tooManyDeclarationsResult -Label 'LoggerMessage declarations (N+1)' -ResourceText 'discovered LoggerMessage declarations'
 
 Write-Host 'Project-analysis resource and bounded-failure gate passed.'

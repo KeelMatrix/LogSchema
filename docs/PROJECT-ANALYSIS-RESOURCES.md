@@ -9,19 +9,38 @@ pwsh -NoProfile -NonInteractive -File ./build/Test-ProjectAnalysisResources.ps1 
 
 The probe creates its fixture under `artifacts/validation/` and removes it on the next run. It performs a controlled restore with the repository `NuGet.config`, then runs the Release-built shipping DLL, not a test-only extractor.
 
-## Fixture and limits
+## One analysis budget
 
 The normal fixture contains 24 SDK-style `net8.0` projects arranged as a project-reference graph, 16 C# source documents per project, and four `[LoggerMessage]` declarations per document: 24 projects, 384 source documents, and 1,536 declarations. The generated solution is a classic `.sln` because it is the solution format supported by the shipping Roslyn/MSBuild workspace on the verified SDK.
 
-The extractor fails closed before semantic scanning when the loaded graph exceeds any of these product limits:
+The product graph ceilings are 64 C# projects, 512 project documents, and 4,096 source documents across the input.
 
-- 64 C# projects in one solution;
-- 512 project documents;
-- 4,096 source documents across the input.
+`capture` and `check` use one shared analysis budget. When the input is a `.sln` or `.slnx`, a bounded text/XML preflight counts C# project entries before `OpenSolutionAsync`; a direct project input is preflighted as one project. The loaded graph is then checked again, source file metadata is checked before compilation loading, and semantic scanning checks compilation and declaration counters incrementally:
 
-These are safety ceilings, not performance promises. An input above a ceiling returns exit code 3 with a `Project analysis resource limit exceeded` error. MSBuild evaluation remains a local trust boundary; callers should isolate untrusted projects because a target project or imported MSBuild logic can have behavior outside LogSchema's own code.
+| Resource | Ceiling | Enforcement point |
+| --- | ---: | --- |
+| C# projects | 64 | Solution preflight and loaded graph |
+| Source documents in one project | 512 | Project document preflight |
+| Source documents across the input | 4,096 | Project document preflight |
+| Bytes in one source document | 1 MiB | File metadata or bounded workspace text |
+| Source bytes in one project | 16 MiB | Project document preflight |
+| Source bytes across the input | 64 MiB | Project document preflight |
+| Solution file bytes during `.sln`/`.slnx` preflight | 16 MiB | Before parsing solution entries |
+| Compilation syntax trees in one project, including generated trees | 8,192 | Immediately after compilation creation |
+| Generated syntax trees in one project | 4,096 | Before each generated tree is ordered or scanned |
+| Generated source bytes in one tree | 4 MiB | Text length check before `ToString()` |
+| Generated source bytes across the input | 64 MiB | Before generated-tree ordering/scanning continues |
+| Discovered `[LoggerMessage]` declarations | 4,096 | At each attributed method during scanning |
+| Supported events | 4,096 | Before retaining each extracted event |
+| Unsupported declarations | 4,096 | Before retaining each unsupported record |
 
-The probe also restores and analyzes two pathological inputs: a 65-project solution and a one-project source graph with 513 documents. Both must fail clearly with exit code 3 without exceeding the 120-second bounded-failure allowance.
+The generated-tree path checks `SourceText.Length` and the per-tree ceiling before converting a tree to a string for logical identity. It then accounts for encoded bytes and orders only the bounded set of identities. Declaration, event, and unsupported counters are shared across the input and fail at N+1 rather than continuing extraction.
+
+Every exceeded ceiling uses the documented `Project analysis resource limit exceeded` error family, returns exit code 3, leaves no baseline, and emits no stack trace or machine path. These are safety ceilings, not performance promises. The measured positive fixture remains useful evidence, but does not promise that arbitrary MSBuild or generator work will fit the runner budget.
+
+MSBuild evaluation itself remains a local trust boundary and is not sandboxed or absolutely bounded by these checks. A target project, imported file, task, restore, SDK, or source generator may perform work while MSBuild/Roslyn produces the inputs. The budget bounds LogSchema-owned semantic work after evaluation has produced the project graph, source metadata, compilation, and generated trees, and cheaply rejects obviously oversized solution graphs before the expensive solution-open path where the input format permits it. Callers should isolate untrusted projects.
+
+The probe restores and analyzes the realistic 24/384/1,536 fixture plus adversarial inputs at both N and N+1 for project count, source-document count, source bytes, generated-tree count/text, and declaration count. It also verifies total source bytes, compilation-tree accounting, exit 3, actionable analysis-error output, no stack traces, and no machine paths. Pathological inputs must fail without exceeding the 120-second bounded-failure allowance.
 
 ## Measured CI budget
 
