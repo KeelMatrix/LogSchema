@@ -313,8 +313,9 @@ Compatibility summary:
   INFO     Event/structured-state additions and message-template changes with unchanged structured state.
   A placeholder is one occurrence in the message template. Structured state is the unique, method-ordered
   set of emitted properties produced by the generator; a matched placeholder supplies its emitted casing,
-  otherwise the ordinary parameter name is emitted. Parameter roles record the first logger, exception,
-  and dynamic-level arguments; later candidates are state parameters. Fixed and dynamic level sources are distinct.
+  otherwise the ordinary parameter name is emitted. Parameter roles record the first logger, exception, and LogLevel candidates independently; later candidates are state parameters.
+  A dynamic first LogLevel supplies the runtime level and is excluded from state, while a fixed-level first LogLevel is emitted as state.
+  Fixed and dynamic level sources are distinct.
   Structured identity fields use exact ordinal comparison; case-only emitted-property renames are KMLOG102.
   Declared type text must be canonical; forms are classified structurally: top-level ILogger arity 0/1,
   exact top-level LogLevel or Exception, else None. Non-canonical text and form contradictions return 3

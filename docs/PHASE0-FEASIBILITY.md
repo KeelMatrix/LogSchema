@@ -6,7 +6,7 @@ This document describes the committed fixtures used to validate LogSchema's desi
 
 - `phase0/` is a non-packable feasibility probe. It exercises direct MSBuild/Roslyn extraction and remains useful for detecting changes to the underlying project-loading assumptions.
 - `src/KeelMatrix.LogSchema.Core/` is the shipping extractor used by the packaged `logschema` tool. `build/Test-ShippingMatrix.ps1` runs the semantic fixture matrix against this implementation.
-- `build/validate.ps1` runs both matrices, grounds the effective state model against emitted source from the pinned Microsoft generator, and then installs the built NuGet tool through a local tool manifest for consumer-level `capture`, `check`, and `diff` tests.
+- `build/validate.ps1` runs both matrices, grounds the effective state model against emitted source from the pinned Microsoft generator (`Microsoft.Extensions.Logging.Abstractions` 10.0.1 / generator assembly `10.0.13.7005`), and then installs the built NuGet tool through a local tool manifest for consumer-level `capture`, `check`, and `diff` tests.
 
 Success of the feasibility probe alone is not evidence that the shipping implementation behaves correctly.
 

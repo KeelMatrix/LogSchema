@@ -528,11 +528,6 @@ internal static class ManifestJson
                 throw new ManifestValidationException("A manifest event parameter form contradicts the required form for its canonical declared type.");
             }
 
-            if (!requiredForms.Contains("ILogger", StringComparer.Ordinal))
-            {
-                throw new ManifestValidationException("A manifest event parameter form contradicts the required form for its canonical declared type.");
-            }
-
             ValidateEffectiveParameterModel(@event, parsedIdentity);
 
             foreach (var placeholder in @event.Placeholders)
@@ -586,13 +581,6 @@ internal static class ManifestJson
         }
 
         var names = new HashSet<string>(StringComparer.Ordinal);
-        var loggerCount = 0;
-        var exceptionCount = 0;
-        var dynamicLevelCount = 0;
-        string? loggerParameter = null;
-        string? exceptionParameter = null;
-        string? levelParameter = null;
-        var allowedRoles = new HashSet<string>(["Logger", "Exception", "DynamicLevel", "State"], StringComparer.Ordinal);
 
         for (var index = 0; index < @event.Parameters.Count; index++)
         {
@@ -601,60 +589,45 @@ internal static class ManifestJson
             if (string.IsNullOrWhiteSpace(parameter.Name) || !IsCanonicalIdentifier(parameter.Name) || !names.Add(parameter.Name) ||
                 !string.Equals(parameter.Type, identityParameter.Type, StringComparison.Ordinal) ||
                 !string.Equals(parameter.RefKind, identityParameter.RefKind, StringComparison.Ordinal) ||
-                !ParameterRefKinds.Contains(parameter.RefKind) || !allowedRoles.Contains(parameter.Role))
+                !ParameterRefKinds.Contains(parameter.RefKind))
             {
                 throw new ManifestValidationException("A manifest event effective parameter model contains an invalid or contradictory parameter.");
             }
-
-            switch (parameter.Role)
-            {
-                case "Logger":
-                    loggerCount++;
-                    loggerParameter = parameter.Name;
-                    break;
-                case "Exception":
-                    exceptionCount++;
-                    exceptionParameter = parameter.Name;
-                    break;
-                case "DynamicLevel":
-                    dynamicLevelCount++;
-                    levelParameter = parameter.Name;
-                    break;
-            }
         }
 
-        if (loggerCount != 1 || exceptionCount > 1 || dynamicLevelCount > 1 || !string.Equals(@event.LoggerParameter, loggerParameter, StringComparison.Ordinal) || !string.Equals(@event.ExceptionParameter, exceptionParameter, StringComparison.Ordinal))
+        if (!LoggerMessageGeneratorSemantics.TryCreatePersistedModel(
+                @event.Parameters,
+                @event.LoggerParameter,
+                @event.ExceptionParameter,
+                @event.LevelSource,
+                @event.Level,
+                @event.LevelParameter,
+                out var semantics,
+                out var semanticsReason))
         {
-            throw new ManifestValidationException("A manifest event effective parameter model has inconsistent special-parameter roles.");
+            throw new ManifestValidationException(semanticsReason!);
         }
 
-        if (@event.LevelSource == "Dynamic")
+        var dynamicLevel = string.Equals(@event.LevelSource, "Dynamic", StringComparison.Ordinal);
+        if (!LoggerMessageGeneratorSemantics.TryValidateTemplate(semantics, dynamicLevel, @event.Placeholders, out var templateReason))
         {
-            if (!string.Equals(@event.Level, "Dynamic", StringComparison.Ordinal) || dynamicLevelCount != 1 || !string.Equals(@event.LevelParameter, levelParameter, StringComparison.Ordinal))
-            {
-                throw new ManifestValidationException("A manifest event dynamic level source is inconsistent with its parameter roles.");
-            }
-        }
-        else if (@event.LevelParameter is not null || dynamicLevelCount != 0)
-        {
-            throw new ManifestValidationException("A manifest event fixed level source cannot have a dynamic level parameter.");
+            throw new ManifestValidationException(templateReason!);
         }
 
         var parameterIndexes = @event.Parameters.Select((parameter, index) => (parameter.Name, index)).ToDictionary(item => item.Name, item => item.index, StringComparer.Ordinal);
-        var parametersByName = @event.Parameters.ToDictionary(parameter => parameter.Name, StringComparer.OrdinalIgnoreCase);
         var structuredNames = new HashSet<string>(StringComparer.Ordinal);
         var lastIndex = -1;
         foreach (var property in @event.StructuredState)
         {
             if (string.IsNullOrWhiteSpace(property.ParameterName) || string.IsNullOrWhiteSpace(property.EmittedName) || !structuredNames.Add(property.ParameterName) ||
                 !parameterIndexes.TryGetValue(property.ParameterName, out var index) || index <= lastIndex ||
-                (@event.Parameters[index].Role is not ("State" or "Exception")))
+                !semantics.IsStructuredState(@event.Parameters[index].Name, dynamicLevel, @event.Placeholders))
             {
                 throw new ManifestValidationException("A manifest structured state model contains an invalid or out-of-order property.");
             }
 
             var parameter = @event.Parameters[index];
-            var expectedEmittedName = @event.Placeholders.FirstOrDefault(placeholder => string.Equals(placeholder.Name, parameter.Name, StringComparison.OrdinalIgnoreCase))?.Name ?? parameter.Name;
+            var expectedEmittedName = LoggerMessageGeneratorSemantics.EmittedName(parameter.Name, @event.Placeholders);
             if (!string.Equals(property.EmittedName, expectedEmittedName, StringComparison.Ordinal))
             {
                 throw new ManifestValidationException("A manifest structured state model has an emitted name that contradicts its template or parameter name.");
@@ -663,20 +636,8 @@ internal static class ManifestJson
             lastIndex = index;
         }
 
-        foreach (var placeholder in @event.Placeholders)
-        {
-            if (!parametersByName.TryGetValue(placeholder.Name, out var parameter))
-            {
-                throw new ManifestValidationException("A manifest placeholder does not match a method parameter.");
-            }
-            if (parameter.Role is "Logger" or "DynamicLevel")
-            {
-                throw new ManifestValidationException("A manifest placeholder references a generator-special parameter outside the supported declaration scope.");
-            }
-        }
-
         var expectedStateParameters = @event.Parameters
-            .Where(parameter => parameter.Role == "State" || parameter.Role == "Exception" && @event.Placeholders.Any(placeholder => string.Equals(placeholder.Name, parameter.Name, StringComparison.OrdinalIgnoreCase)))
+            .Where(parameter => semantics.IsStructuredState(parameter.Name, dynamicLevel, @event.Placeholders))
             .Select(parameter => parameter.Name)
             .ToHashSet(StringComparer.Ordinal);
         if (!expectedStateParameters.SetEquals(structuredNames))

@@ -202,7 +202,11 @@ try {
     $multipleLoggerEvent = @($capturedManifest.events | Where-Object method -eq 'MultipleLoggers')
     Assert-That ($multipleLoggerEvent.Count -eq 1 -and $multipleLoggerEvent[0].loggerParameter -eq 'firstLogger' -and $multipleLoggerEvent[0].parameters[1].role -eq 'State') 'installed capture must apply first-logger semantics'
     $multipleLevelEvent = @($capturedManifest.events | Where-Object method -eq 'MultipleDynamicLevels')
-    Assert-That ($multipleLevelEvent.Count -eq 1 -and $multipleLevelEvent[0].levelSource -eq 'Dynamic' -and $multipleLevelEvent[0].levelParameter -eq 'firstLevel' -and $multipleLevelEvent[0].parameters[2].role -eq 'State') 'installed capture must apply first-dynamic-level semantics'
+    Assert-That ($multipleLevelEvent.Count -eq 1 -and $multipleLevelEvent[0].levelSource -eq 'Dynamic' -and $multipleLevelEvent[0].levelParameter -eq 'firstLevel' -and $multipleLevelEvent[0].parameters[1].role -eq 'LogLevel' -and $multipleLevelEvent[0].parameters[2].role -eq 'State') 'installed capture must apply first-dynamic-level semantics'
+    $fixedLevelAbsentEvent = @($capturedManifest.events | Where-Object method -eq 'FixedLevelParameterAbsentFromTemplate')
+    Assert-That ($fixedLevelAbsentEvent.Count -eq 1 -and $fixedLevelAbsentEvent[0].levelSource -eq 'Fixed' -and $fixedLevelAbsentEvent[0].levelParameter -eq 'level' -and $fixedLevelAbsentEvent[0].parameters[1].role -eq 'LogLevel' -and @($fixedLevelAbsentEvent[0].structuredState).Count -eq 1 -and $fixedLevelAbsentEvent[0].structuredState[0].emittedName -eq 'level') 'installed capture must preserve fixed-level LogLevel state even when the placeholder is absent'
+    $fixedMultipleEvent = @($capturedManifest.events | Where-Object method -eq 'MultipleFixedLevels')
+    Assert-That ($fixedMultipleEvent.Count -eq 1 -and $fixedMultipleEvent[0].levelSource -eq 'Fixed' -and $fixedMultipleEvent[0].parameters[1].role -eq 'LogLevel' -and $fixedMultipleEvent[0].parameters[2].role -eq 'State' -and ((@($fixedMultipleEvent[0].structuredState) | ForEach-Object emittedName) -join ',') -eq 'firstLevel,laterLevel') 'installed capture must preserve fixed-level first and later LogLevel state'
     $specialTemplateEvent = @($capturedManifest.events | Where-Object method -eq 'SpecialExceptionInTemplate')
     Assert-That ($specialTemplateEvent.Count -eq 1 -and $specialTemplateEvent[0].parameters[1].role -eq 'Exception' -and $specialTemplateEvent[0].structuredState[0].emittedName -eq 'exception') 'installed capture must retain the generator-specific exception state when the special parameter is referenced'
 
@@ -301,7 +305,7 @@ try {
         }
         $parameterRecords = @(
             [pscustomobject]@{ name = 'logger'; type = 'Microsoft.Extensions.Logging.ILogger'; refKind = 'None'; role = 'Logger' },
-            [pscustomobject]@{ name = 'level'; type = 'Microsoft.Extensions.Logging.LogLevel'; refKind = 'None'; role = 'DynamicLevel' },
+            [pscustomobject]@{ name = 'level'; type = 'Microsoft.Extensions.Logging.LogLevel'; refKind = 'None'; role = 'LogLevel' },
             [pscustomobject]@{ name = 'exception'; type = 'System.Exception'; refKind = 'None'; role = 'Exception' },
             [pscustomobject]@{ name = 'derived'; type = 'DerivedProblem'; refKind = 'None'; role = 'State' },
             [pscustomobject]@{ name = 'ordinary'; type = 'OrdinaryProblem'; refKind = 'None'; role = 'State' },

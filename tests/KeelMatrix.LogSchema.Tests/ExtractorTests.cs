@@ -114,10 +114,32 @@ public sealed class ExtractorTests
             Assert.Equal("firstLogger", loggers.GetProperty("loggerParameter").GetString());
 
             var levels = events["MultipleDynamicLevels"];
-            Assert.Equal("DynamicLevel", levels.GetProperty("parameters").EnumerateArray().ElementAt(1).GetProperty("role").GetString());
+            Assert.Equal("LogLevel", levels.GetProperty("parameters").EnumerateArray().ElementAt(1).GetProperty("role").GetString());
             Assert.Equal("State", levels.GetProperty("parameters").EnumerateArray().ElementAt(2).GetProperty("role").GetString());
             Assert.Equal("firstLevel", levels.GetProperty("levelParameter").GetString());
             Assert.Equal("Fixed", events["FixedLevelParameter"].GetProperty("levelSource").GetString());
+
+            var fixedLevelAbsent = events["FixedLevelParameterAbsentFromTemplate"];
+            Assert.Equal("LogLevel", fixedLevelAbsent.GetProperty("parameters").EnumerateArray().ElementAt(1).GetProperty("role").GetString());
+            Assert.Equal("level", fixedLevelAbsent.GetProperty("structuredState").EnumerateArray().Single().GetProperty("emittedName").GetString());
+            Assert.Equal("level", fixedLevelAbsent.GetProperty("levelParameter").GetString());
+
+            var fixedLevels = events["MultipleFixedLevels"];
+            Assert.Equal("LogLevel", fixedLevels.GetProperty("parameters").EnumerateArray().ElementAt(1).GetProperty("role").GetString());
+            Assert.Equal("State", fixedLevels.GetProperty("parameters").EnumerateArray().ElementAt(2).GetProperty("role").GetString());
+            Assert.Equal(["firstLevel", "laterLevel"], fixedLevels.GetProperty("structuredState").EnumerateArray().Select(item => item.GetProperty("emittedName").GetString()!).ToArray());
+
+            var customLogger = events["CustomLoggerFirst"];
+            Assert.Equal("Logger", customLogger.GetProperty("parameters").EnumerateArray().ElementAt(0).GetProperty("role").GetString());
+            Assert.Equal("State", customLogger.GetProperty("parameters").EnumerateArray().ElementAt(1).GetProperty("role").GetString());
+            Assert.Equal("first", customLogger.GetProperty("loggerParameter").GetString());
+            Assert.Equal("second", customLogger.GetProperty("structuredState").EnumerateArray().Single().GetProperty("emittedName").GetString());
+
+            var overlapping = events["OverlappingSpecialRoles"];
+            Assert.Equal("Logger|Exception", overlapping.GetProperty("parameters").EnumerateArray().ElementAt(0).GetProperty("role").GetString());
+            Assert.Equal("value", overlapping.GetProperty("loggerParameter").GetString());
+            Assert.Equal("value", overlapping.GetProperty("exceptionParameter").GetString());
+            Assert.Empty(overlapping.GetProperty("structuredState").EnumerateArray());
 
             var specialTemplate = events["SpecialExceptionInTemplate"];
             Assert.Equal("Exception", specialTemplate.GetProperty("parameters").EnumerateArray().ElementAt(1).GetProperty("role").GetString());
@@ -171,6 +193,18 @@ public sealed class ExtractorTests
             using var captureOutput = new StringWriter();
             using var captureErrors = new StringWriter();
             Assert.Equal(0, await CommandRunner.RunAsync(["capture", projectPath, "--output", baselinePath, "--no-telemetry"], captureOutput, captureErrors));
+
+            await File.WriteAllTextAsync(sourcePath, original.Replace("FixedLevelParameterAbsentFromTemplate(ILogger logger, LogLevel level)", "FixedLevelParameterAbsentFromTemplate(ILogger logger, LogLevel severity)", StringComparison.Ordinal));
+            using var fixedLevelRenameOutput = new StringWriter();
+            using var fixedLevelRenameErrors = new StringWriter();
+            Assert.Equal(1, await CommandRunner.RunAsync(["check", projectPath, "--baseline", baselinePath, "--no-telemetry"], fixedLevelRenameOutput, fixedLevelRenameErrors));
+            Assert.Contains("KMLOG102", fixedLevelRenameOutput.ToString(), StringComparison.Ordinal);
+
+            await File.WriteAllTextAsync(sourcePath, original.Replace("Custom logger {second}", "Custom logger {renamedSecond}", StringComparison.Ordinal).Replace("CustomLoggerFirst(CustomLogger first, ILogger second)", "CustomLoggerFirst(CustomLogger first, ILogger renamedSecond)", StringComparison.Ordinal));
+            using var customLoggerRenameOutput = new StringWriter();
+            using var customLoggerRenameErrors = new StringWriter();
+            Assert.Equal(1, await CommandRunner.RunAsync(["check", projectPath, "--baseline", baselinePath, "--no-telemetry"], customLoggerRenameOutput, customLoggerRenameErrors));
+            Assert.Contains("KMLOG102", customLoggerRenameOutput.ToString(), StringComparison.Ordinal);
 
             await File.WriteAllTextAsync(sourcePath, original.Replace("int customerId", "int accountId", StringComparison.Ordinal));
             using var renameOutput = new StringWriter();

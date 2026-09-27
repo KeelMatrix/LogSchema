@@ -395,7 +395,7 @@ public sealed class ManifestJsonTests
             "parameterForms": ["ILogger", "LogLevel", "Exception", "None", "None", "None"],
             "parameters": [
               { "name": "logger", "type": "Microsoft.Extensions.Logging.ILogger", "refKind": "None", "role": "Logger" },
-              { "name": "level", "type": "Microsoft.Extensions.Logging.LogLevel", "refKind": "None", "role": "DynamicLevel" },
+              { "name": "level", "type": "Microsoft.Extensions.Logging.LogLevel", "refKind": "None", "role": "LogLevel" },
               { "name": "exception", "type": "System.Exception", "refKind": "None", "role": "Exception" },
               { "name": "derived", "type": "P.DerivedProblem", "refKind": "None", "role": "State" },
               { "name": "ordinary", "type": "P.OrdinaryProblem", "refKind": "None", "role": "State" },

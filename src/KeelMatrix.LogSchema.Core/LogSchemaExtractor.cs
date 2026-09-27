@@ -178,6 +178,7 @@ internal sealed class LogSchemaExtractor
         private readonly SourceProvenanceRegistry sourceProvenance = new();
         private readonly HashSet<string> reportedProvenanceCollisions = new(StringComparer.Ordinal);
         private readonly string projectDirectory;
+        private bool hasLoggerMessageDeclaration;
 
         internal ProjectExtractor(Project project, Compilation compilation, ProjectIdentity projectIdentity)
         {
@@ -220,6 +221,18 @@ internal sealed class LogSchemaExtractor
                     "Multiple project-source LoggerMessage declarations share one stable method identity; generated pairing is ambiguous.",
                     pair.Key,
                     pair.Value.OrderBy(source => source.File, StringComparer.Ordinal).ThenBy(source => source.Line).ToArray()));
+            }
+
+            var generatorVersions = LoggerMessageGeneratorSemantics.DetectGeneratorVersions(compilation, cancellationToken);
+            if (hasLoggerMessageDeclaration && !LoggerMessageGeneratorSemantics.IsSupportedGeneratorVersion(generatorVersions))
+            {
+                analysisIssues.Add(new AnalysisIssue(
+                    projectIdentity.Key,
+                    LoggerMessageGeneratorSemantics.GeneratorVersionIssueCode,
+                    "error",
+                    LoggerMessageGeneratorSemantics.GeneratorVersionFailureMessage(generatorVersions),
+                    string.Empty,
+                    Array.Empty<SourceLocation>()));
             }
 
             var diagnostics = compilation.GetDiagnostics(cancellationToken)
@@ -270,6 +283,8 @@ internal sealed class LogSchemaExtractor
                     continue;
                 }
 
+                hasLoggerMessageDeclaration |= isProjectSource;
+
                 var source = new SourceLocation(logicalPath, methodSyntax.GetLocation().GetLineSpan().StartLinePosition.Line + 1, isProjectSource ? "source" : "generated");
                 var declarationKey = GetDeclarationKey(methodSymbol);
                 if (isProjectSource)
@@ -298,7 +313,7 @@ internal sealed class LogSchemaExtractor
                     continue;
                 }
 
-                if (!TryExtract(methodSyntax, methodSymbol, attribute, source, out var contract, out var reason))
+                if (!TryExtract(methodSyntax, methodSymbol, attribute, compilation, source, out var contract, out var reason))
                 {
                     AddUnsupported(source, methodSyntax, declarationKey, reason!);
                     continue;
@@ -318,7 +333,7 @@ internal sealed class LogSchemaExtractor
         IReadOnlyList<AnalysisIssue> AnalysisIssues,
         IReadOnlyList<string> CompilationDiagnosticKinds);
 
-    private static bool TryExtract(MethodDeclarationSyntax syntax, IMethodSymbol method, AttributeData attribute, SourceLocation source, out EventContract? contract, out string? reason)
+    private static bool TryExtract(MethodDeclarationSyntax syntax, IMethodSymbol method, AttributeData attribute, Compilation compilation, SourceLocation source, out EventContract? contract, out string? reason)
     {
         contract = null;
         reason = null;
@@ -342,12 +357,7 @@ internal sealed class LogSchemaExtractor
             reason = "generic logging methods are outside the supported LoggerMessage scope";
             return false;
         }
-        if (!method.Parameters.Any(parameter => IsLogger(parameter.Type)))
-        {
-            reason = "method has no ILogger parameter";
-            return false;
-        }
-        if (!TryReadAttribute(attribute, method, out var eventId, out var eventName, out var level, out var message, out var levelParameter, out reason))
+        if (!TryReadAttribute(attribute, method, out var eventId, out var eventName, out var level, out var message, out reason))
         {
             return false;
         }
@@ -356,68 +366,30 @@ internal sealed class LogSchemaExtractor
             return false;
         }
 
-        var roles = new Dictionary<string, string>(StringComparer.Ordinal);
-        var loggerParameter = string.Empty;
-        string? exceptionParameter = null;
-        var loggerSeen = false;
-        var exceptionSeen = false;
-        var dynamicLevelSeen = false;
-        var dynamicLevel = string.Equals(level, DynamicLevelName, StringComparison.Ordinal);
-        foreach (var parameter in method.Parameters)
+        if (!LoggerMessageGeneratorSemantics.TryClassify(method, compilation, out var semantics, out reason))
         {
-            var role = "State";
-            if (!loggerSeen && IsLogger(parameter.Type))
-            {
-                role = "Logger";
-                loggerSeen = true;
-                loggerParameter = parameter.Name;
-            }
-            else if (!exceptionSeen && IsException(parameter.Type))
-            {
-                role = "Exception";
-                exceptionSeen = true;
-                exceptionParameter = parameter.Name;
-            }
-            else if (dynamicLevel && !dynamicLevelSeen && IsLogLevel(parameter.Type))
-            {
-                role = "DynamicLevel";
-                dynamicLevelSeen = true;
-            }
-
-            roles.Add(parameter.Name, role);
+            return false;
         }
 
-        var parametersByName = method.Parameters.ToDictionary(parameter => parameter.Name, StringComparer.OrdinalIgnoreCase);
-        foreach (var placeholder in placeholders)
+        var dynamicLevel = string.Equals(level, DynamicLevelName, StringComparison.Ordinal);
+        if (dynamicLevel && semantics.LevelParameter is null)
         {
-            if (!parametersByName.TryGetValue(placeholder.Name, out var parameter))
-            {
-                reason = "message placeholder does not match a method parameter";
-                return false;
-            }
+            reason = "level was omitted and no generator-effective LogLevel parameter supplies a dynamic level";
+            return false;
+        }
 
-            var role = roles[parameter.Name];
-            if (role is "Logger" or "DynamicLevel")
-            {
-                reason = $"message placeholder references the generator-special {role} parameter, which is outside the supported declaration scope";
-                return false;
-            }
+        if (!LoggerMessageGeneratorSemantics.TryValidateTemplate(semantics, dynamicLevel, placeholders, out reason))
+        {
+            return false;
         }
 
         var structuredState = method.Parameters
-            .Where(parameter => roles[parameter.Name] == "State" || roles[parameter.Name] == "Exception" && placeholders.Any(placeholder => string.Equals(placeholder.Name, parameter.Name, StringComparison.OrdinalIgnoreCase)))
+            .Where(parameter => semantics.IsStructuredState(parameter.Name, dynamicLevel, placeholders))
             .Select(parameter =>
             {
-                var matchedPlaceholder = placeholders.FirstOrDefault(placeholder => string.Equals(placeholder.Name, parameter.Name, StringComparison.OrdinalIgnoreCase));
-                return new StructuredStateProperty(parameter.Name, matchedPlaceholder?.Name ?? parameter.Name);
+                return new StructuredStateProperty(parameter.Name, LoggerMessageGeneratorSemantics.EmittedName(parameter.Name, placeholders));
             })
             .ToArray();
-
-        if (string.IsNullOrEmpty(loggerParameter))
-        {
-            reason = "method has no generator-effective ILogger parameter";
-            return false;
-        }
 
         var containingTypeName = method.ContainingType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat).Replace("global::", string.Empty, StringComparison.Ordinal);
         contract = new EventContract(
@@ -438,22 +410,21 @@ internal sealed class LogSchemaExtractor
                 parameter.Name,
                 parameter.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat).Replace("global::", string.Empty, StringComparison.Ordinal),
                 parameter.RefKind.ToString(),
-                roles[parameter.Name])).ToArray(),
+                semantics.Parameter(parameter.Name).Role)).ToArray(),
             structuredState,
-            loggerParameter,
-            exceptionParameter,
+            semantics.LoggerParameter,
+            semantics.ExceptionParameter,
             dynamicLevel ? "Dynamic" : "Fixed",
-            dynamicLevel ? levelParameter : null);
+            semantics.LevelParameter);
         return true;
     }
 
-    private static bool TryReadAttribute(AttributeData attribute, IMethodSymbol method, out int eventId, out string eventName, out string level, out string message, out string? levelParameter, out string? reason)
+    private static bool TryReadAttribute(AttributeData attribute, IMethodSymbol method, out int eventId, out string eventName, out string level, out string message, out string? reason)
     {
         eventId = 0;
         eventName = method.Name;
         level = string.Empty;
         message = string.Empty;
-        levelParameter = null;
         reason = null;
         int? suppliedEventId = null;
         string? suppliedEventName = null;
@@ -503,13 +474,6 @@ internal sealed class LogSchemaExtractor
         }
         else
         {
-            levelParameter = method.Parameters.FirstOrDefault(parameter => IsLogLevel(parameter.Type))?.Name;
-            if (levelParameter is null)
-            {
-                reason = "level was omitted and no LogLevel parameter supplies a dynamic level";
-                return false;
-            }
-
             level = DynamicLevelName;
         }
 
@@ -565,17 +529,7 @@ internal sealed class LogSchemaExtractor
         return hash == int.MinValue ? 0 : Math.Abs(hash);
     }
 
-    private static bool IsLogger(ITypeSymbol type) => type is INamedTypeSymbol named && named.Name == "ILogger" && named.ContainingType is null && named.ContainingNamespace.ToDisplayString() == "Microsoft.Extensions.Logging" && named.Arity is 0 or 1;
-    private static bool IsLogLevel(ITypeSymbol type) => type is INamedTypeSymbol named && named.Name == "LogLevel" && named.ContainingType is null && named.ContainingNamespace.ToDisplayString() == "Microsoft.Extensions.Logging" && named.Arity == 0;
     private static string GetParameterForm(ITypeSymbol type) => ManifestJson.GetRequiredParameterForm(type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat).Replace("global::", string.Empty, StringComparison.Ordinal));
-    private static bool IsException(ITypeSymbol type)
-    {
-        for (var current = type; current is not null; current = (current as INamedTypeSymbol)?.BaseType)
-        {
-            if (current.Name == "Exception" && current.ContainingNamespace.ToDisplayString() == "System") return true;
-        }
-        return false;
-    }
 
     private static bool IsGeneratedImplementation(MethodDeclarationSyntax syntax) => syntax.AttributeLists.SelectMany(attributes => attributes.Attributes).Any(attribute => attribute.Name.ToString().EndsWith("GeneratedCode", StringComparison.Ordinal) || attribute.Name.ToString().EndsWith("GeneratedCodeAttribute", StringComparison.Ordinal));
     private static string NormalizeDeclaration(string declaration) => declaration.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n');

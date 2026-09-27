@@ -96,8 +96,29 @@ function Assert-OrdinaryFixture {
     Assert-That ((@($events.UnicodeTemplate.placeholders.name) -join ',') -eq 'Идентификатор') "$Name Unicode placeholders must be preserved"
     Assert-That ($events.NestedEvent.containingType -eq "$Namespace.PartialOuter.NestedLogging") "$Name nested partial type identity must be preserved"
     Assert-That ($events.GeneratedPartial.source.kind -eq 'source') "$Name project-source generated-style declaration must retain source provenance"
-
     Write-Host "$Name shipping manifest: events=$(@($manifest.events).Count) unsupported=$(@($manifest.unsupported).Count) sha256=$firstHash"
+}
+
+function Assert-GeneratorStateFixture {
+    $fixtureDirectory = Join-Path $outputRoot 'generator-state'
+    New-Item -ItemType Directory -Force -Path $fixtureDirectory | Out-Null
+    $manifestPath = Join-Path $fixtureDirectory 'manifest.json'
+    $projectPath = Join-Path $RepositoryRoot 'tests/PackageConsumerFixture/PackageConsumerFixture.csproj'
+    $capture = Invoke-ShippingTool -Arguments @('capture', $projectPath, '--tfm', 'net8.0', '--output', $manifestPath, '--no-telemetry')
+    Assert-That ($capture.ExitCode -eq 0) "generator-state shipping capture must return exit 0. $($capture.Output)"
+    $manifest = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json
+    Assert-That (@($manifest.events).Count -eq 23) 'generator-state shipping capture must contain all 23 supported declarations'
+    Assert-That (@($manifest.unsupported).Count -eq 0) 'generator-state shipping capture must not omit supported generator-state declarations'
+    $events = @{}
+    foreach ($event in @($manifest.events)) { $events[[string]$event.method] = $event }
+    Assert-That ($events.FixedLevelParameterAbsentFromTemplate.levelSource -eq 'Fixed' -and $events.FixedLevelParameterAbsentFromTemplate.levelParameter -eq 'level' -and $events.FixedLevelParameterAbsentFromTemplate.parameters[1].role -eq 'LogLevel' -and @($events.FixedLevelParameterAbsentFromTemplate.structuredState).Count -eq 1 -and $events.FixedLevelParameterAbsentFromTemplate.structuredState[0].emittedName -eq 'level') 'shipping extractor must mirror fixed-level first LogLevel state when the placeholder is absent'
+    Assert-That ($events.FixedLevelParameter.levelSource -eq 'Fixed' -and $events.FixedLevelParameter.parameters[1].role -eq 'LogLevel' -and $events.FixedLevelParameter.structuredState[0].emittedName -eq 'level') 'shipping extractor must mirror fixed-level first LogLevel state when the placeholder is referenced'
+    Assert-That ($events.MultipleFixedLevels.levelSource -eq 'Fixed' -and $events.MultipleFixedLevels.parameters[1].role -eq 'LogLevel' -and $events.MultipleFixedLevels.parameters[2].role -eq 'State' -and ((@($events.MultipleFixedLevels.structuredState) | ForEach-Object emittedName) -join ',') -eq 'firstLevel,laterLevel') 'shipping extractor must mirror fixed-level first and later LogLevel state semantics'
+    Assert-That ($events.MultipleDynamicLevels.levelSource -eq 'Dynamic' -and $events.MultipleDynamicLevels.levelParameter -eq 'firstLevel' -and $events.MultipleDynamicLevels.parameters[1].role -eq 'LogLevel' -and $events.MultipleDynamicLevels.parameters[2].role -eq 'State' -and $events.MultipleDynamicLevels.structuredState[0].emittedName -eq 'laterLevel') 'shipping extractor must mirror first-dynamic-level and later-level state semantics'
+    Assert-That ($events.CustomLoggerFirst.loggerParameter -eq 'first' -and $events.CustomLoggerFirst.parameters[0].role -eq 'Logger' -and $events.CustomLoggerFirst.parameters[1].role -eq 'State' -and $events.CustomLoggerFirst.structuredState[0].emittedName -eq 'second') 'shipping extractor must mirror implicit-reference first-logger semantics'
+    Assert-That ($events.OverlappingSpecialRoles.parameters[0].role -eq 'Logger|Exception' -and $events.OverlappingSpecialRoles.loggerParameter -eq 'value' -and $events.OverlappingSpecialRoles.exceptionParameter -eq 'value' -and @($events.OverlappingSpecialRoles.structuredState).Count -eq 0) 'shipping extractor must preserve overlapping logger and exception roles without silently selecting one'
+    Assert-That ($events.SpecialExceptionInTemplate.parameters[1].role -eq 'Exception' -and $events.SpecialExceptionInTemplate.structuredState[0].emittedName -eq 'exception') 'shipping extractor must mirror referenced first-exception state behavior'
+    Write-Host "Generator-state shipping manifest: events=$(@($manifest.events).Count)"
 }
 
 function Assert-RootIndependentManifest {
@@ -153,6 +174,7 @@ Assert-OrdinaryFixture -Name 'net8' -Project 'fixtures/Phase0.Net8/Phase0.Net8.c
 Assert-OrdinaryFixture -Name 'stable' -Project 'fixtures/Phase0.Stable/Phase0.Stable.csproj' -TargetFramework 'net10.0' -Namespace 'Phase0.Stable'
 Assert-OrdinaryFixture -Name 'multi-net8' -Project 'fixtures/Phase0.Multi/Phase0.Multi.csproj' -TargetFramework 'net8.0' -Namespace 'Phase0.Multi'
 Assert-OrdinaryFixture -Name 'multi-net10' -Project 'fixtures/Phase0.Multi/Phase0.Multi.csproj' -TargetFramework 'net10.0' -Namespace 'Phase0.Multi'
+Assert-GeneratorStateFixture
 Assert-RootIndependentManifest
 
 $pairingOutput = Join-Path $outputRoot 'pairing.json'

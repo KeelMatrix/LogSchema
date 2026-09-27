@@ -20,3 +20,4 @@ Changes for the KeelMatrix.LogSchema package are recorded here using the Keep a 
 - Repository-pinned local tool installation and restore instructions, with installed `capture`, `check`, and `diff` validation on Windows, Linux, and macOS.
 - Collision-safe logical source provenance for project, linked outside-project, and generated documents, with fail-closed handling for unsafe or ambiguous identities.
 - Bounded design-time project analysis with clear failures for oversized project and source graphs, including a reproducible resource gate for large SDK-style solutions.
+- Generator-grounded `LoggerMessage` semantics for the pinned `Microsoft.Extensions.Logging.Abstractions` 10.0.1 / generator assembly 10.0.13.7005 pair, including independent first-special-role classification, fixed-level `LogLevel` state, and fail-closed version detection.

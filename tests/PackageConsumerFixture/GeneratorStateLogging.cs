@@ -34,6 +34,18 @@ public static partial class GeneratorStateLogging
     [LoggerMessage(EventId = 1209, Level = LogLevel.Information, Message = "Fixed level {level}")]
     public static partial void FixedLevelParameter(ILogger logger, LogLevel level);
 
+    [LoggerMessage(EventId = 1214, Level = LogLevel.Information, Message = "Fixed levels {laterLevel}")]
+    public static partial void MultipleFixedLevels(ILogger logger, LogLevel firstLevel, LogLevel laterLevel);
+
+    [LoggerMessage(EventId = 1211, Level = LogLevel.Information, Message = "Processing")]
+    public static partial void FixedLevelParameterAbsentFromTemplate(ILogger logger, LogLevel level);
+
+    [LoggerMessage(EventId = 1212, Level = LogLevel.Information, Message = "Custom logger {second}")]
+    public static partial void CustomLoggerFirst(CustomLogger first, ILogger second);
+
+    [LoggerMessage(EventId = 1213, Level = LogLevel.Error, Message = "Overlapping special roles")]
+    public static partial void OverlappingSpecialRoles(CustomLoggerException value);
+
     [LoggerMessage(EventId = 1210, Level = LogLevel.Error, Message = "Role flip")]
     public static partial void RoleFlip(ILogger logger, RoleFlipProblem problem);
 }
@@ -41,4 +53,26 @@ public static partial class GeneratorStateLogging
 [System.Diagnostics.CodeAnalysis.SuppressMessage("Naming", "CA1710:Identifiers should have correct suffix", Justification = "The role-transition fixture intentionally uses a stable non-Exception type name.")]
 public sealed class RoleFlipProblem : Exception
 {
+}
+
+public sealed class CustomLogger : ILogger
+{
+    public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+    public bool IsEnabled(LogLevel logLevel) => false;
+
+    public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+    {
+    }
+}
+
+public sealed class CustomLoggerException : Exception, ILogger
+{
+    public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+    public bool IsEnabled(LogLevel logLevel) => false;
+
+    public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+    {
+    }
 }
