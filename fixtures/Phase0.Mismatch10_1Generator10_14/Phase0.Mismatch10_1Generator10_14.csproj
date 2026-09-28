@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <AssemblyName>Phase0.Mismatch10_1Generator10_14</AssemblyName>
+    <RootNamespace>Phase0.Mismatch10_1Generator10_14</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <LogSchemaNuGetPackageRoot Condition="'$(NuGetPackageRoot)' != ''">$(NuGetPackageRoot)</LogSchemaNuGetPackageRoot>
+    <LogSchemaNuGetPackageRoot Condition="'$(LogSchemaNuGetPackageRoot)' == '' and '$(USERPROFILE)' != ''">$(USERPROFILE)/.nuget/packages/</LogSchemaNuGetPackageRoot>
+    <LogSchemaNuGetPackageRoot Condition="'$(LogSchemaNuGetPackageRoot)' == '' and '$(HOME)' != ''">$(HOME)/.nuget/packages/</LogSchemaNuGetPackageRoot>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" VersionOverride="10.0.12" IncludeAssets="analyzers;build;buildTransitive" PrivateAssets="all" />
+    <Reference Include="Microsoft.Extensions.Logging.Abstractions">
+      <HintPath>$(LogSchemaNuGetPackageRoot)microsoft.extensions.logging.abstractions/10.0.1/lib/net8.0/Microsoft.Extensions.Logging.Abstractions.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+</Project>

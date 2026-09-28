@@ -1,6 +1,5 @@
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
-using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 namespace KeelMatrix.LogSchema;
 
@@ -33,16 +32,17 @@ internal sealed record LoggerMessageMethodSemantics(
 internal static class LoggerMessageGeneratorSemantics
 {
     internal const string GeneratorAssemblyName = "Microsoft.Extensions.Logging.Generators";
-    internal const string SupportedAbstractionsPackageRange = "10.0.1 and 10.0.12";
+    internal const string SupportedAbstractionsPackageVersion = "10.0.1";
+    internal const string CurrentStableAbstractionsPackageVersion = "10.0.12";
     internal const string SupportedGeneratorAssemblyVersion = "10.0.13.7005";
     internal const string CurrentStableGeneratorAssemblyVersion = "10.0.14.42308";
     internal const string GeneratorVersionIssueCode = "KMLOGP009";
+    internal const string MixedGeneratorVersionIssueCode = "KMLOGP010";
+    internal const string GeneratorDiagnosticIssueCode = "KMLOGP011";
 
     private const string LoggerMetadataName = "Microsoft.Extensions.Logging.ILogger";
     private const string LogLevelMetadataName = "Microsoft.Extensions.Logging.LogLevel";
     private const string ExceptionMetadataName = "System.Exception";
-    private const string GeneratedCodeAttributeName = "System.CodeDom.Compiler.GeneratedCodeAttribute";
-
     internal static bool TryClassify(IMethodSymbol method, Compilation compilation, out LoggerMessageMethodSemantics semantics, out string? reason)
     {
         semantics = null!;
@@ -188,49 +188,30 @@ internal static class LoggerMessageGeneratorSemantics
         return true;
     }
 
-    internal static IReadOnlySet<string> DetectGeneratorVersions(Compilation compilation, CancellationToken cancellationToken)
-    {
-        var versions = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var tree in compilation.SyntaxTrees)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            var root = tree.GetRoot(cancellationToken);
-            var model = compilation.GetSemanticModel(tree);
-            foreach (var method in root.DescendantNodes().OfType<MethodDeclarationSyntax>())
-            {
-                var symbol = model.GetDeclaredSymbol(method, cancellationToken);
-                if (symbol is null)
-                {
-                    continue;
-                }
-
-                foreach (var attribute in symbol.GetAttributes())
-                {
-                    if (!string.Equals(attribute.AttributeClass?.ToDisplayString(), GeneratedCodeAttributeName, StringComparison.Ordinal) || attribute.ConstructorArguments.Length < 2)
-                    {
-                        continue;
-                    }
-
-                    if (attribute.ConstructorArguments[0].Value is string name &&
-                        string.Equals(name, GeneratorAssemblyName, StringComparison.Ordinal) &&
-                        attribute.ConstructorArguments[1].Value is string version)
-                    {
-                        versions.Add(version);
-                    }
-                }
-            }
-        }
-
-        return versions;
-    }
-
     internal static bool IsSupportedGeneratorVersion(IReadOnlySet<string> versions) =>
         versions.Count == 1 && (versions.Contains(SupportedGeneratorAssemblyVersion) || versions.Contains(CurrentStableGeneratorAssemblyVersion));
 
-    internal static string GeneratorVersionFailureMessage(IReadOnlySet<string> versions) =>
-        versions.Count == 0
-            ? $"The Microsoft.Extensions.Logging.Generators assembly version could not be detected; verified support is limited to Microsoft.Extensions.Logging.Abstractions {SupportedAbstractionsPackageRange} with generator assemblies {SupportedGeneratorAssemblyVersion} (10.0.1) and {CurrentStableGeneratorAssemblyVersion} (10.0.12)."
-            : $"The project uses Microsoft.Extensions.Logging.Generators version(s) '{string.Join(", ", versions.Order(StringComparer.Ordinal))}'; verified support is limited to Microsoft.Extensions.Logging.Abstractions {SupportedAbstractionsPackageRange} with generator assemblies {SupportedGeneratorAssemblyVersion} (10.0.1) and {CurrentStableGeneratorAssemblyVersion} (10.0.12).";
+    internal static string GeneratorVersionFailureMessage(string? abstractionsVersion, string? generatorVersion) =>
+        $"The project resolved Microsoft.Extensions.Logging.Abstractions version '{abstractionsVersion ?? "unknown"}' with Microsoft.Extensions.Logging.Generators assembly version '{generatorVersion ?? "unknown"}'; verified support is limited to the exact pairs {SupportedAbstractionsPackageVersion} / {SupportedGeneratorAssemblyVersion} and {CurrentStableAbstractionsPackageVersion} / {CurrentStableGeneratorAssemblyVersion}.";
+
+    internal static bool IsSupportedVersionPair(string? abstractionsVersion, string? generatorVersion) =>
+        string.Equals(abstractionsVersion, SupportedAbstractionsPackageVersion, StringComparison.Ordinal) &&
+        string.Equals(generatorVersion, SupportedGeneratorAssemblyVersion, StringComparison.Ordinal) ||
+        string.Equals(abstractionsVersion, CurrentStableAbstractionsPackageVersion, StringComparison.Ordinal) &&
+        string.Equals(generatorVersion, CurrentStableGeneratorAssemblyVersion, StringComparison.Ordinal);
+
+    internal static bool IsPinnedGeneratedCodeAttribute(AttributeData attribute, INamedTypeSymbol generatedCodeAttribute, string generatorVersion)
+    {
+        if (!SymbolEqualityComparer.Default.Equals(attribute.AttributeClass, generatedCodeAttribute) || attribute.ConstructorArguments.Length < 2)
+        {
+            return false;
+        }
+
+        return attribute.ConstructorArguments[0].Value is string toolName &&
+            attribute.ConstructorArguments[1].Value is string version &&
+            string.Equals(toolName, GeneratorAssemblyName, StringComparison.Ordinal) &&
+            string.Equals(version, generatorVersion, StringComparison.Ordinal);
+    }
 
     internal static string FormatRole(GeneratorParameterRoles roles)
     {

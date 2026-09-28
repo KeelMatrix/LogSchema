@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Diagnostics;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Xml;
@@ -6,6 +7,7 @@ using Microsoft.Build.Locator;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.CodeAnalysis.Diagnostics;
 using Microsoft.CodeAnalysis.MSBuild;
 
 namespace KeelMatrix.LogSchema;
@@ -89,6 +91,7 @@ internal sealed class LogSchemaExtractor
         var allUnsupported = new List<UnsupportedDeclaration>();
         var allIssues = new List<AnalysisIssue>();
         var compilationDiagnostics = new HashSet<string>(StringComparer.Ordinal);
+        var generatorVersionsByProject = new Dictionary<string, string>(StringComparer.Ordinal);
 
         foreach (var project in projects)
         {
@@ -124,10 +127,28 @@ internal sealed class LogSchemaExtractor
             allEvents.AddRange(result.Events.Select(@event => @event with { ProjectKey = projectKey }));
             allUnsupported.AddRange(result.Unsupported.Select(item => item with { ProjectKey = projectKey }));
             allIssues.AddRange(result.AnalysisIssues.Select(issue => issue with { ProjectKey = projectKey }));
+            if (result.GeneratorVersion is not null)
+            {
+                generatorVersionsByProject[projectKey] = result.GeneratorVersion;
+            }
             foreach (var diagnostic in result.CompilationDiagnosticKinds)
             {
                 compilationDiagnostics.Add(diagnostic);
             }
+        }
+
+        var solutionGeneratorVersions = generatorVersionsByProject.Values.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
+        if (solutionGeneratorVersions.Length > 1)
+        {
+            var firstProject = allProjects[0].Key;
+            var projectVersions = string.Join(", ", generatorVersionsByProject.OrderBy(pair => pair.Key, StringComparer.Ordinal).Select(pair => $"{pair.Key}={pair.Value}"));
+            allIssues.Add(new AnalysisIssue(
+                firstProject,
+                LoggerMessageGeneratorSemantics.MixedGeneratorVersionIssueCode,
+                "error",
+                $"The solution resolves mixed Microsoft.Extensions.Logging.Generators assembly versions ({projectVersions}); capture fails closed at solution scope.",
+                string.Empty,
+                Array.Empty<SourceLocation>()));
         }
 
         foreach (var diagnosticKind in workspaceDiagnostics.Distinct(StringComparer.Ordinal))
@@ -302,9 +323,13 @@ internal sealed class LogSchemaExtractor
         private readonly List<AnalysisIssue> analysisIssues = [];
         private readonly HashSet<SyntaxTree> scannedTrees = [];
         private readonly Dictionary<string, List<SourceLocation>> sourceDeclarations = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, List<SourceMethod>> sourceMethods = new(StringComparer.Ordinal);
         private readonly Dictionary<string, List<SourceCandidate>> sourceCandidates = new(StringComparer.Ordinal);
         private readonly Dictionary<string, int> generatedImplementationCounts = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, int> remainingPinnedCompiledImplementations = new(StringComparer.Ordinal);
         private readonly HashSet<string> pairedGeneratedDeclarations = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, string> generatorDiagnosticDeclarations = new(StringComparer.Ordinal);
+        private readonly HashSet<string> generatorDiagnosticKinds = new(StringComparer.Ordinal);
         private readonly SourceProvenanceRegistry sourceProvenance = new();
         private readonly HashSet<string> reportedProvenanceCollisions = new(StringComparer.Ordinal);
         private readonly string projectDirectory;
@@ -334,9 +359,10 @@ internal sealed class LogSchemaExtractor
                 }
             }
 
+            var projectSourceTrees = scannedTrees.ToArray();
             var syntaxTrees = compilation.SyntaxTrees.ToArray();
             budget.ObserveSyntaxTrees(syntaxTrees.Length);
-            var generatedTrees = new List<GeneratedSyntaxTree>();
+            var compiledGeneratedTrees = new List<GeneratedSyntaxTree>();
             foreach (var tree in syntaxTrees)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -356,10 +382,49 @@ internal sealed class LogSchemaExtractor
                 var generatedBytes = (text.Encoding ?? Encoding.UTF8).GetByteCount(generatedText);
                 budget.ObserveGeneratedSourceBytes(generatedBytes);
                 var logicalPath = SourceProvenance.NormalizeGeneratedPath(tree.FilePath, generatedText);
-                generatedTrees.Add(new GeneratedSyntaxTree(tree, logicalPath));
+                compiledGeneratedTrees.Add(new GeneratedSyntaxTree(tree, logicalPath, generatedText));
             }
 
-            foreach (var generatedTree in generatedTrees.OrderBy(tree => tree.LogicalPath, StringComparer.Ordinal))
+            var generatorRun = RunPinnedGenerator(projectSourceTrees, cancellationToken);
+            foreach (var diagnostic in generatorRun.Diagnostics)
+            {
+                AddGeneratorDiagnostic(diagnostic);
+            }
+
+            foreach (var generatedTree in generatorRun.GeneratedTrees.OrderBy(tree => tree.LogicalPath, StringComparer.Ordinal))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                budget.ObserveGeneratedSyntaxTree();
+                var generatedBytes = (generatedTree.Tree.GetText(cancellationToken).Encoding ?? Encoding.UTF8).GetByteCount(generatedTree.Text);
+                budget.ObserveGeneratedSourceBytes(generatedBytes);
+                Scan(
+                    generatedTree.Tree.GetRoot(cancellationToken),
+                    generatorRun.OutputCompilation.GetSemanticModel(generatedTree.Tree),
+                    generatedTree.Tree.FilePath,
+                    false,
+                    generatedTree.Tree,
+                    generatedTree.LogicalPath,
+                    generatedTree.Text,
+                    generatorRun.GeneratorVersion,
+                    true);
+            }
+
+            foreach (var generatedTree in generatorRun.GeneratedTrees)
+            {
+                var model = generatorRun.OutputCompilation.GetSemanticModel(generatedTree.Tree);
+                foreach (var methodSyntax in generatedTree.Tree.GetRoot(cancellationToken).DescendantNodes().OfType<MethodDeclarationSyntax>())
+                {
+                    var methodSymbol = model.GetDeclaredSymbol(methodSyntax, cancellationToken);
+                    var attribute = methodSymbol?.GetAttributes().FirstOrDefault(attribute => string.Equals(attribute.AttributeClass?.ToDisplayString(), LoggerMessageAttributeName, StringComparison.Ordinal));
+                    if (methodSymbol is not null && attribute is not null && generatorRun.GeneratorVersion is not null && IsPinnedGeneratedImplementation(methodSymbol, model.Compilation, generatorRun.GeneratorVersion))
+                    {
+                        var declarationKey = GetDeclarationKey(methodSymbol);
+                        remainingPinnedCompiledImplementations[declarationKey] = remainingPinnedCompiledImplementations.GetValueOrDefault(declarationKey) + 1;
+                    }
+                }
+            }
+
+            foreach (var generatedTree in compiledGeneratedTrees.OrderBy(tree => tree.LogicalPath, StringComparer.Ordinal))
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 Scan(
@@ -368,7 +433,10 @@ internal sealed class LogSchemaExtractor
                     generatedTree.Tree.FilePath,
                     false,
                     generatedTree.Tree,
-                    generatedTree.LogicalPath);
+                    generatedTree.LogicalPath,
+                    generatedTree.Text,
+                    generatorRun.GeneratorVersion,
+                    false);
             }
 
             foreach (var pair in sourceDeclarations.Where(pair => pair.Value.Count > 1).OrderBy(pair => pair.Key, StringComparer.Ordinal))
@@ -386,13 +454,15 @@ internal sealed class LogSchemaExtractor
             {
                 var generatedCount = generatedImplementationCounts.GetValueOrDefault(pair.Key);
                 var hasExactlyOneSource = sourceDeclarations.TryGetValue(pair.Key, out var declarations) && declarations.Count == 1;
-                if (hasExactlyOneSource && generatedCount == 1)
+                if (hasExactlyOneSource && generatedCount == 1 && !generatorDiagnosticDeclarations.ContainsKey(pair.Key))
                 {
                     events.AddRange(pair.Value.Select(candidate => candidate.Contract));
                     continue;
                 }
 
-                var reason = generatedCount == 0
+                var reason = generatorDiagnosticDeclarations.TryGetValue(pair.Key, out var generatorDiagnostic)
+                    ? generatorDiagnostic
+                    : generatedCount == 0
                     ? "source LoggerMessage declaration has no generated implementation counterpart"
                     : $"source LoggerMessage declaration has {generatedCount.ToString(CultureInfo.InvariantCulture)} generated implementation counterparts; exactly one is required";
                 foreach (var candidate in pair.Value)
@@ -401,14 +471,15 @@ internal sealed class LogSchemaExtractor
                 }
             }
 
-            var generatorVersions = LoggerMessageGeneratorSemantics.DetectGeneratorVersions(compilation, cancellationToken);
-            if (hasLoggerMessageDeclaration && !LoggerMessageGeneratorSemantics.IsSupportedGeneratorVersion(generatorVersions))
+            var versionPairRejected = !generatorRun.IsSupportedPair &&
+                (hasLoggerMessageDeclaration || generatorRun.AbstractionsVersion is not null || generatorRun.GeneratorVersion is not null);
+            if (versionPairRejected)
             {
                 analysisIssues.Add(new AnalysisIssue(
                     projectIdentity.Key,
                     LoggerMessageGeneratorSemantics.GeneratorVersionIssueCode,
                     "error",
-                    LoggerMessageGeneratorSemantics.GeneratorVersionFailureMessage(generatorVersions),
+                    LoggerMessageGeneratorSemantics.GeneratorVersionFailureMessage(generatorRun.AbstractionsVersion, generatorRun.GeneratorVersion),
                     string.Empty,
                     Array.Empty<SourceLocation>()));
             }
@@ -416,13 +487,20 @@ internal sealed class LogSchemaExtractor
             var diagnostics = compilation.GetDiagnostics(cancellationToken)
                 .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error || diagnostic.Severity == DiagnosticSeverity.Warning)
                 .Select(diagnostic => diagnostic.Id + ":" + diagnostic.Severity)
+                .Concat(generatorDiagnosticKinds)
                 .Distinct(StringComparer.Ordinal)
                 .OrderBy(value => value, StringComparer.Ordinal)
                 .ToArray();
+            // SYSLIB10xx is the pinned LoggerMessage generator's declaration-diagnostic family. Those
+            // diagnostics are consumed from GeneratorDriver.GetRunResult above and their declarations remain
+            // unsupported; the compiler-side consequence must not hide the more precise paired outcome.
             var fatalDiagnostics = diagnostics.Where(value => value.EndsWith(":Error", StringComparison.Ordinal) &&
                 !value.StartsWith("CS8795:", StringComparison.Ordinal) &&
-                !value.StartsWith("SYSLIB1015:", StringComparison.Ordinal)).ToArray();
-            if (fatalDiagnostics.Length > 0)
+                !value.StartsWith("SYSLIB10", StringComparison.Ordinal)).ToArray();
+            // A cross-pair can make the compiler report follow-on errors from the
+            // generator/reference mismatch. KMLOGP009 is the precise fail-closed
+            // result for that bounded family; do not hide it behind KMLOGP005.
+            if (fatalDiagnostics.Length > 0 && !versionPairRejected)
             {
                 analysisIssues.Add(new AnalysisIssue(
                     projectIdentity.Key,
@@ -433,7 +511,7 @@ internal sealed class LogSchemaExtractor
                     Array.Empty<SourceLocation>()));
             }
 
-            return new ProjectExtractionResult(events, unsupported, analysisIssues, diagnostics);
+            return new ProjectExtractionResult(events, unsupported, analysisIssues, diagnostics, generatorRun.GeneratorVersion);
         }
 
         private void Scan(
@@ -443,7 +521,9 @@ internal sealed class LogSchemaExtractor
             bool isProjectSource,
             SyntaxTree syntaxTree,
             string? generatedLogicalPath = null,
-            string? generatedText = null)
+            string? generatedText = null,
+            string? generatedVersion = null,
+            bool isPinnedGenerated = false)
         {
             var logicalPath = isProjectSource
                 ? SourceProvenance.NormalizeProjectRelativePath(projectDirectory, filePath ?? string.Empty)
@@ -468,11 +548,20 @@ internal sealed class LogSchemaExtractor
                     continue;
                 }
 
+                var declarationKey = GetDeclarationKey(methodSymbol);
+                if (!isProjectSource && !isPinnedGenerated && generatedVersion is not null && IsPinnedGeneratedImplementation(methodSymbol, model.Compilation, generatedVersion) && remainingPinnedCompiledImplementations.GetValueOrDefault(declarationKey) > 0)
+                {
+                    // The compiler compilation contains the pinned generator output a second time. It
+                    // was already observed from GeneratorDriver.GetRunResult, so do not charge the
+                    // same declaration against the project-analysis budget again.
+                    remainingPinnedCompiledImplementations[declarationKey]--;
+                    continue;
+                }
+
                 budget.ObserveLoggerMessageDeclaration();
                 hasLoggerMessageDeclaration |= isProjectSource;
 
                 var source = new SourceLocation(logicalPath, methodSyntax.GetLocation().GetLineSpan().StartLinePosition.Line + 1, isProjectSource ? "source" : "generated");
-                var declarationKey = GetDeclarationKey(methodSymbol);
                 if (isProjectSource)
                 {
                     if (!sourceDeclarations.TryGetValue(declarationKey, out var declarations))
@@ -482,7 +571,16 @@ internal sealed class LogSchemaExtractor
                     }
                     declarations.Add(source);
                 }
-                else if (IsGeneratedImplementation(methodSyntax))
+                if (isProjectSource)
+                {
+                    if (!sourceMethods.TryGetValue(declarationKey, out var methods))
+                    {
+                        methods = [];
+                        sourceMethods.Add(declarationKey, methods);
+                    }
+                    methods.Add(new SourceMethod(methodSyntax, methodSymbol, source));
+                }
+                else if (isPinnedGenerated && generatedVersion is not null && IsPinnedGeneratedImplementation(methodSymbol, model.Compilation, generatedVersion))
                 {
                     generatedImplementationCounts[declarationKey] = generatedImplementationCounts.GetValueOrDefault(declarationKey) + 1;
                     if (sourceDeclarations.TryGetValue(declarationKey, out var declarations) && declarations.Count == 1 && pairedGeneratedDeclarations.Add(declarationKey))
@@ -495,14 +593,17 @@ internal sealed class LogSchemaExtractor
                 }
                 else
                 {
-                    AddUnsupported(source, methodSyntax, declarationKey, "generated LoggerMessage declaration has no project-source counterpart");
+                    var generatedReason = isPinnedGenerated
+                        ? "pinned generator output method is missing the verified System.CodeDom.Compiler.GeneratedCodeAttribute tool/version pair"
+                        : "generated LoggerMessage declaration was not produced by the resolved Microsoft.Extensions.Logging.Generators assembly";
+                    AddUnsupported(source, methodSyntax, declarationKey, generatedReason);
                     analysisIssues.Add(new AnalysisIssue(projectIdentity.Key, "KMLOGP002", "warning", "A generated LoggerMessage declaration has no project-source counterpart and was reported explicitly.", declarationKey, [source]));
                     continue;
                 }
 
-                if (!TryExtract(methodSyntax, methodSymbol, attribute, compilation, source, out var contract, out var reason))
+                if (!TryExtract(methodSyntax, methodSymbol, attribute, compilation, source, out var contract, out var extractReason))
                 {
-                    AddUnsupported(source, methodSyntax, declarationKey, reason!);
+                    AddUnsupported(source, methodSyntax, declarationKey, extractReason!);
                     continue;
                 }
 
@@ -527,8 +628,184 @@ internal sealed class LogSchemaExtractor
             unsupported.Add(new UnsupportedDeclaration(projectIdentity.Key, source, declaration, declarationKey, reason));
         }
 
-        private sealed record GeneratedSyntaxTree(SyntaxTree Tree, string LogicalPath);
+        private GeneratorRunResult RunPinnedGenerator(IReadOnlyCollection<SyntaxTree> projectSourceTrees, CancellationToken cancellationToken)
+        {
+            var generatorReferences = project.AnalyzerReferences
+                .OfType<AnalyzerFileReference>()
+                .Where(reference => string.Equals(Path.GetFileName(reference.FullPath), LoggerMessageGeneratorSemantics.GeneratorAssemblyName + ".dll", StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+            if (generatorReferences.Length != 1 || generatorReferences[0] is not AnalyzerFileReference analyzerReference)
+            {
+                return GeneratorRunResult.Failed(compilation, null, ResolveAbstractionsVersion());
+            }
+
+            var generatorVersion = GetAssemblyFileVersion(analyzerReference.FullPath);
+            if (generatorVersion is null)
+            {
+                return GeneratorRunResult.Failed(compilation, null, ResolveAbstractionsVersion());
+            }
+
+            IReadOnlyList<ISourceGenerator> generators;
+            try
+            {
+                generators = analyzerReference.GetGenerators(LanguageNames.CSharp);
+            }
+            catch (Exception exception) when (exception is ArgumentException or IOException or BadImageFormatException or FileNotFoundException or FileLoadException)
+            {
+                return GeneratorRunResult.Failed(compilation, generatorVersion, ResolveAbstractionsVersion());
+            }
+
+            if (generators.Count != 1)
+            {
+                return GeneratorRunResult.Failed(compilation, generatorVersion, ResolveAbstractionsVersion());
+            }
+
+            var sourceTrees = projectSourceTrees.ToArray();
+            var inputCompilation = compilation.RemoveSyntaxTrees(compilation.SyntaxTrees.Where(tree => !sourceTrees.Contains(tree)).ToArray());
+            GeneratorDriver driver = CSharpGeneratorDriver.Create(
+                generators,
+                parseOptions: sourceTrees.FirstOrDefault()?.Options as CSharpParseOptions,
+                optionsProvider: null);
+            driver = driver.RunGeneratorsAndUpdateCompilation(inputCompilation, out var outputCompilation, out _, cancellationToken);
+            var runResult = driver.GetRunResult();
+            var generatedTrees = runResult.GeneratedTrees
+                .Select(tree =>
+                {
+                    var text = tree.GetText(cancellationToken).ToString();
+                    var logicalPath = SourceProvenance.NormalizeGeneratedPath(tree.FilePath, text);
+                    return new GeneratedSyntaxTree(tree, logicalPath, text);
+                })
+                .ToArray();
+            var resolvedAbstractionsVersion = ResolveAbstractionsVersion();
+            return new GeneratorRunResult(
+                outputCompilation,
+                generatedTrees,
+                runResult.Diagnostics,
+                generatorVersion,
+                resolvedAbstractionsVersion,
+                LoggerMessageGeneratorSemantics.IsSupportedVersionPair(resolvedAbstractionsVersion, generatorVersion));
+        }
+
+        private string? ResolveAbstractionsVersion()
+        {
+            var versions = compilation.References
+                .OfType<PortableExecutableReference>()
+                .Where(reference => string.Equals(Path.GetFileName(reference.FilePath), "Microsoft.Extensions.Logging.Abstractions.dll", StringComparison.OrdinalIgnoreCase))
+                .Select(reference => TryResolveAssemblyPackageVersion(reference.FilePath))
+                .ToArray();
+            return versions.Length == 1 ? versions[0] : null;
+        }
+
+        private void AddGeneratorDiagnostic(Diagnostic diagnostic)
+        {
+            if (diagnostic.Severity is not (DiagnosticSeverity.Error or DiagnosticSeverity.Warning))
+            {
+                return;
+            }
+
+            var diagnosticKind = diagnostic.Id + ":" + diagnostic.Severity;
+            generatorDiagnosticKinds.Add(diagnosticKind);
+            if (diagnostic.Id == "SYSLIB1015")
+            {
+                return;
+            }
+
+            var sourceMethod = sourceMethods
+                .SelectMany(pair => pair.Value.Select(method => (DeclarationKey: pair.Key, Method: method)))
+                .FirstOrDefault(candidate => diagnostic.Location.IsInSource &&
+                    (candidate.Method.Syntax.SyntaxTree == diagnostic.Location.SourceTree ||
+                        string.Equals(candidate.Method.Syntax.SyntaxTree.FilePath, diagnostic.Location.SourceTree?.FilePath, StringComparison.OrdinalIgnoreCase)) &&
+                    candidate.Method.Syntax.Span.IntersectsWith(diagnostic.Location.SourceSpan));
+            if (sourceMethod.Method is null)
+            {
+                analysisIssues.Add(new AnalysisIssue(
+                    projectIdentity.Key,
+                    LoggerMessageGeneratorSemantics.GeneratorDiagnosticIssueCode,
+                    "error",
+                    $"Pinned Microsoft.Extensions.Logging.Generators diagnostic {diagnosticKind} could not be paired with one source declaration; capture fails closed.",
+                    string.Empty,
+                    Array.Empty<SourceLocation>()));
+                return;
+            }
+
+            generatorDiagnosticDeclarations[sourceMethod.DeclarationKey] = $"source LoggerMessage declaration has pinned generator diagnostic {diagnosticKind}: {diagnostic.GetMessage(CultureInfo.InvariantCulture)}";
+        }
+
+        private static bool IsPinnedGeneratedImplementation(IMethodSymbol method, Compilation compilation, string generatorVersion)
+        {
+            var generatedCodeAttribute = compilation.GetTypeByMetadataName("System.CodeDom.Compiler.GeneratedCodeAttribute");
+            var attributes = method.GetAttributes();
+            return generatedCodeAttribute is not null && attributes.Any(attribute => LoggerMessageGeneratorSemantics.IsPinnedGeneratedCodeAttribute(attribute, generatedCodeAttribute, generatorVersion));
+        }
+
+        private static string? GetAssemblyFileVersion(string path)
+        {
+            try
+            {
+                var version = FileVersionInfo.GetVersionInfo(path).FileVersion;
+                return string.IsNullOrWhiteSpace(version) ? null : version.Trim();
+            }
+            catch (Exception exception) when (exception is ArgumentException or IOException or FileNotFoundException or UnauthorizedAccessException or BadImageFormatException)
+            {
+                return null;
+            }
+        }
+
+        private static string? TryResolveAssemblyPackageVersion(string? path)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return null;
+            }
+
+            var normalized = path.Replace('\\', '/');
+            var marker = "/microsoft.extensions.logging.abstractions/";
+            var markerIndex = normalized.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+            if (markerIndex >= 0)
+            {
+                var start = markerIndex + marker.Length;
+                var end = normalized.IndexOf('/', start);
+                if (end > start)
+                {
+                    var packageVersion = normalized[start..end];
+                    if (Version.TryParse(packageVersion, out _))
+                    {
+                        return packageVersion;
+                    }
+                }
+            }
+
+            try
+            {
+                var productVersion = FileVersionInfo.GetVersionInfo(path).ProductVersion;
+                if (string.IsNullOrWhiteSpace(productVersion))
+                {
+                    return null;
+                }
+
+                var separator = productVersion.IndexOfAny(['+', '-']);
+                var version = separator >= 0 ? productVersion[..separator] : productVersion;
+                return Version.TryParse(version, out _) ? version : null;
+            }
+            catch (Exception exception) when (exception is ArgumentException or IOException or FileNotFoundException or UnauthorizedAccessException or BadImageFormatException)
+            {
+                return null;
+            }
+        }
+
+        private sealed record GeneratedSyntaxTree(SyntaxTree Tree, string LogicalPath, string Text);
+        private sealed record SourceMethod(MethodDeclarationSyntax Syntax, IMethodSymbol Symbol, SourceLocation Source);
         private sealed record SourceCandidate(SourceLocation Source, string Declaration, EventContract Contract);
+        private sealed record GeneratorRunResult(
+            Compilation OutputCompilation,
+            IReadOnlyList<GeneratedSyntaxTree> GeneratedTrees,
+            IReadOnlyList<Diagnostic> Diagnostics,
+            string? GeneratorVersion,
+            string? AbstractionsVersion,
+            bool IsSupportedPair)
+        {
+            internal static GeneratorRunResult Failed(Compilation compilation, string? generatorVersion, string? abstractionsVersion) => new(compilation, Array.Empty<GeneratedSyntaxTree>(), Array.Empty<Diagnostic>(), generatorVersion, abstractionsVersion, false);
+        }
 
     }
 
@@ -536,7 +813,8 @@ internal sealed class LogSchemaExtractor
         IReadOnlyList<EventContract> Events,
         IReadOnlyList<UnsupportedDeclaration> Unsupported,
         IReadOnlyList<AnalysisIssue> AnalysisIssues,
-        IReadOnlyList<string> CompilationDiagnosticKinds);
+        IReadOnlyList<string> CompilationDiagnosticKinds,
+        string? GeneratorVersion);
 
     private static bool TryExtract(MethodDeclarationSyntax syntax, IMethodSymbol method, AttributeData attribute, Compilation compilation, SourceLocation source, out EventContract? contract, out string? reason)
     {
@@ -822,7 +1100,6 @@ internal sealed class LogSchemaExtractor
 
     private static string GetParameterForm(ITypeSymbol type) => ManifestJson.GetRequiredParameterForm(type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat).Replace("global::", string.Empty, StringComparison.Ordinal));
 
-    private static bool IsGeneratedImplementation(MethodDeclarationSyntax syntax) => syntax.AttributeLists.SelectMany(attributes => attributes.Attributes).Any(attribute => attribute.Name.ToString().EndsWith("GeneratedCode", StringComparison.Ordinal) || attribute.Name.ToString().EndsWith("GeneratedCodeAttribute", StringComparison.Ordinal));
     private static string NormalizeDeclaration(string declaration) => declaration.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n');
 }
 

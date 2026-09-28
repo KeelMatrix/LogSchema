@@ -23,6 +23,34 @@ public sealed class LoggerMessageGeneratorSemanticsTests
     }
 
     [Fact]
+    public void GeneratorSupportRequiresTheExactResolvedAbstractionsPair()
+    {
+        var supported = new[]
+        {
+            (Abstractions: "10.0.1", Generator: "10.0.13.7005"),
+            (Abstractions: "10.0.12", Generator: "10.0.14.42308")
+        };
+        foreach (var pair in supported)
+        {
+            Assert.True(LoggerMessageGeneratorSemantics.IsSupportedVersionPair(pair.Abstractions, pair.Generator));
+        }
+
+        var rejected = new[]
+        {
+            (Abstractions: "10.0.1", Generator: "10.0.14.42308"),
+            (Abstractions: "10.0.12", Generator: "10.0.13.7005"),
+            (Abstractions: "10.0.0", Generator: "10.0.13.2411"),
+            (Abstractions: "unknown", Generator: "10.0.13.7005"),
+            (Abstractions: "10.0.1", Generator: null as string),
+            (Abstractions: null as string, Generator: "10.0.14.42308")
+        };
+        foreach (var pair in rejected)
+        {
+            Assert.False(LoggerMessageGeneratorSemantics.IsSupportedVersionPair(pair.Abstractions, pair.Generator));
+        }
+    }
+
+    [Fact]
     public void FixedAndDynamicLevelSourcesShareRolesButDifferInStructuredState()
     {
         var fixedParameters = new[]

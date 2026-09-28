@@ -330,6 +330,7 @@ Invoke-Timed 'Line-ending contract' {
 Invoke-Timed 'Format and analyzer validation' { dotnet format $solution --no-restore --verify-no-changes --verbosity minimal }
 Invoke-Timed 'Release build' { dotnet build $solution -c Release --no-restore @msbuildVersionArgument --nologo }
 Invoke-Timed 'Pinned generator state grounding' { Invoke-NestedPwsh -ArgumentList @('-NoProfile', '-NonInteractive', '-File', (Join-Path $repositoryRoot 'build/Test-GeneratorStateGrounding.ps1'), '-RepositoryRoot', $repositoryRoot) }
+Invoke-Timed 'Generator boundary and mixed-solution matrix' { Invoke-NestedPwsh -ArgumentList @('-NoProfile', '-NonInteractive', '-File', (Join-Path $repositoryRoot 'build/Test-GeneratorBoundary.ps1'), '-RepositoryRoot', $repositoryRoot) }
 Invoke-Timed 'Unit and contract tests' { dotnet test (Join-Path $repositoryRoot 'tests/KeelMatrix.LogSchema.Tests/KeelMatrix.LogSchema.Tests.csproj') -c Release --no-build --no-restore --nologo }
 Invoke-Timed 'Phase 0 regression matrix' { Invoke-NestedPwsh -ArgumentList @('-NoProfile', '-NonInteractive', '-File', (Join-Path $repositoryRoot 'build/Test-Phase0Matrix.ps1')) }
 Invoke-Timed 'Shipping semantic fixture matrix' { Invoke-NestedPwsh -ArgumentList @('-NoProfile', '-NonInteractive', '-File', (Join-Path $repositoryRoot 'build/Test-ShippingMatrix.ps1'), '-RepositoryRoot', $repositoryRoot) }

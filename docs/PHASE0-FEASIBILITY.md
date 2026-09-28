@@ -6,7 +6,7 @@ This document describes the committed fixtures used to validate LogSchema's desi
 
 - `phase0/` is a non-packable feasibility probe. It exercises direct MSBuild/Roslyn extraction and remains useful for detecting changes to the underlying project-loading assumptions.
 - `src/KeelMatrix.LogSchema.Core/` is the shipping extractor used by the packaged `logschema` tool. `build/Test-ShippingMatrix.ps1` runs the semantic fixture matrix against this implementation.
-- `build/validate.ps1` runs both matrices, grounds the effective state model against emitted source from the verified Microsoft generator pairs (`Microsoft.Extensions.Logging.Abstractions` 10.0.1 / generator assembly `10.0.13.7005` and 10.0.12 / generator assembly `10.0.14.42308`), and then installs the built NuGet tool through a local tool manifest for consumer-level `capture`, `check`, and `diff` tests.
+- `build/validate.ps1` runs the semantic matrices, grounds the effective state model against emitted source from the exact resolved Microsoft generator pairs (`Microsoft.Extensions.Logging.Abstractions` 10.0.1 / generator assembly `10.0.13.7005` and 10.0.12 / generator assembly `10.0.14.42308`), exercises `GeneratorDriver.GetRunResult()` diagnostics and mixed-version solutions, and then installs the built NuGet tool through a local tool manifest for consumer-level `capture`, `check`, and `diff` tests.
 
 Success of the feasibility probe alone is not evidence that the shipping implementation behaves correctly.
 
@@ -19,6 +19,9 @@ Success of the feasibility probe alone is not evidence that the shipping impleme
 | `fixtures/Phase0.Multi` | The same source evaluated separately for `net8.0` and `net10.0`. |
 | `fixtures/Phase0.Pairing` | Duplicate source identities, ref-kind and generic-arity identity dimensions, and an unpaired generated declaration. The shipping extractor must fail closed rather than guess a pairing. |
 | `fixtures/Phase0.CurrentStable` | A clean declaration against the current stable 10.0.12 logging abstractions package and its 10.0.14.42308 generator. |
+| `fixtures/Phase0.UnsupportedGenerator` and `fixtures/Phase0.Mismatch*` | Unsupported and cross-pair resolved package/generator combinations that must fail closed. |
+| `fixtures/Phase0.FakeGenerated` | A user-authored `.g.cs` partial implementation with alias and spoofed pinned `GeneratedCode` attributes; the shipping extractor must not trust it. |
+| `fixtures/Phase0.Mixed` | Two-project solutions in both project orders; mixed generator versions must fail closed at solution scope. |
 | `fixtures/Phase0.Rejected` | `out`, `ref`, `in`, `ref readonly`, and `params` declaration shapes rejected by the generator; each must remain unsupported. |
 | `fixtures/Phase0.Sentinel` | A controlled assembly-load sentinel used only to prove that the sentinel fails if deliberately initialized. |
 

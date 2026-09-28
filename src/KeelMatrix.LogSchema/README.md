@@ -44,7 +44,7 @@ The log contract is the effective EventId, EventName, level source, message temp
 
 ### Generator compatibility
 
-The supported generator boundary is defined by the exact verified pairs `Microsoft.Extensions.Logging.Abstractions` 10.0.1 / `Microsoft.Extensions.Logging.Generators` 10.0.13.7005 and `Microsoft.Extensions.Logging.Abstractions` 10.0.12 / `Microsoft.Extensions.Logging.Generators` 10.0.14.42308. Mixed, unknown, or undetectable versions fail closed. A captured event also requires exactly one matching generated implementation; generator-rejected, missing, duplicate, and unmatchable declarations are reported as unsupported.
+The supported generator boundary is defined by the exact resolved pairs `Microsoft.Extensions.Logging.Abstractions` 10.0.1 / `Microsoft.Extensions.Logging.Generators` 10.0.13.7005 and `Microsoft.Extensions.Logging.Abstractions` 10.0.12 / `Microsoft.Extensions.Logging.Generators` 10.0.14.42308. The extractor resolves package/reference overrides, runs the pinned generator through `GeneratorDriver`, and consumes its `GetRunResult()` diagnostics; only `SYSLIB1015` is benign. Mixed, unknown, unsupported, and cross-pair versions fail closed (`KMLOGP009`/`KMLOGP010`). A captured event also requires exactly one matching implementation from the pinned run, identified through the real `GeneratedCodeAttribute` symbol and exact tool/version values; custom-generator and user-authored counterparts are reported as unsupported.
 
 ## Compatibility summary
 

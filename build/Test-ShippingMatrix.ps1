@@ -75,8 +75,8 @@ function Assert-OrdinaryFixture {
     $manifest = Get-Content -Raw -LiteralPath $firstPath | ConvertFrom-Json
     Assert-That (@($manifest.projects).Count -eq 1) "$Name must contain exactly one project"
     Assert-That ($manifest.projects[0].key -eq "$Namespace|$TargetFramework") "$Name project key must include the selected target framework"
-    Assert-That (@($manifest.events).Count -eq 15) "$Name must capture all 15 supported declarations"
-    Assert-That (@($manifest.unsupported).Count -eq 3) "$Name must retain all three unsupported declarations"
+    Assert-That (@($manifest.events).Count -eq 14) "$Name must capture all 14 supported declarations"
+    Assert-That (@($manifest.unsupported).Count -eq 4) "$Name must retain all four unsupported declarations, including generator-diagnostic declarations"
     Assert-That (@($manifest.analysisIssues | Where-Object severity -eq 'error').Count -eq 0) "$Name must not contain analysis errors"
     Assert-That ($first.Output -match 'Coverage: incomplete') "$Name output must identify incomplete unsupported coverage"
 
@@ -96,6 +96,8 @@ function Assert-OrdinaryFixture {
     Assert-That ((@($events.UnicodeTemplate.placeholders.name) -join ',') -eq 'Идентификатор') "$Name Unicode placeholders must be preserved"
     Assert-That ($events.NestedEvent.containingType -eq "$Namespace.PartialOuter.NestedLogging") "$Name nested partial type identity must be preserved"
     Assert-That ($events.GeneratedPartial.source.kind -eq 'source') "$Name project-source generated-style declaration must retain source provenance"
+    Assert-That (@($manifest.unsupported | Where-Object { $_.declaration -match 'InstanceEvent' -and $_.reason -match 'SYSLIB1009' }).Count -eq 1) "$Name generator-diagnostic declaration must remain unsupported with its run-result diagnostic"
+    Assert-That (@($manifest.compilationDiagnosticKinds | Where-Object { $_ -eq 'SYSLIB1015:Warning' }).Count -eq 1) "$Name benign SYSLIB1015 must be classified and retained without making the declaration unsupported"
     Write-Host "$Name shipping manifest: events=$(@($manifest.events).Count) unsupported=$(@($manifest.unsupported).Count) sha256=$firstHash"
 }
 
@@ -197,7 +199,7 @@ $pairing = Invoke-ShippingTool -Arguments @('capture', (Join-Path $RepositoryRoo
 Assert-That ($pairing.ExitCode -eq 3) 'ambiguous shipping pairing must fail closed with exit 3'
 Assert-That ($pairing.Output -match 'KMLOGP001') 'ambiguous shipping pairing must report KMLOGP001'
 Assert-That ($pairing.Output -match 'KMLOGP005') 'untrustworthy pairing compilation must report KMLOGP005'
-Assert-That ($pairing.Output -match 'generated LoggerMessage declaration has no project-source counterpart') 'unpaired generated declaration must remain explicit'
+Assert-That ($pairing.Output -match 'generated LoggerMessage declaration was not produced by the resolved Microsoft.Extensions.Logging.Generators assembly') 'custom-generator declaration must remain explicit and untrusted'
 Assert-That (-not (Test-Path -LiteralPath $pairingOutput)) 'failed ambiguous shipping capture must not write a baseline'
 
 Write-Host 'Shipping semantic fixture matrix passed.'

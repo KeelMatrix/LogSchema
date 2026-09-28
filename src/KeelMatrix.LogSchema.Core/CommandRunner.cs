@@ -326,6 +326,11 @@ Compatibility summary:
   otherwise the ordinary parameter name is emitted. Parameter roles record the first logger, exception, and LogLevel candidates independently; later candidates are state parameters.
   A dynamic first LogLevel supplies the runtime level and is excluded from state, while a fixed-level first LogLevel is emitted as state.
   Fixed and dynamic level sources are distinct.
+  Capture resolves the actual Microsoft.Extensions.Logging.Abstractions reference and pinned generator; only
+  10.0.1/10.0.13.7005 and 10.0.12/10.0.14.42308 are supported. GeneratorDriver.GetRunResult diagnostics
+  keep diagnostic-bearing declarations unsupported except benign SYSLIB1015; mixed solution generator versions
+  return KMLOGP010. Generated counterparts must come from that run and carry the real GeneratedCodeAttribute
+  symbol with the pinned tool/version pair.
   Structured identity fields use exact ordinal comparison; case-only emitted-property renames are KMLOG102.
   Declared type text must be canonical; forms are classified structurally: top-level ILogger arity 0/1,
   exact top-level LogLevel or Exception, else None. Non-canonical text and form contradictions return 3
