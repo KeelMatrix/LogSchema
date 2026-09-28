@@ -302,6 +302,8 @@ internal sealed class LogSchemaExtractor
         private readonly List<AnalysisIssue> analysisIssues = [];
         private readonly HashSet<SyntaxTree> scannedTrees = [];
         private readonly Dictionary<string, List<SourceLocation>> sourceDeclarations = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, List<SourceCandidate>> sourceCandidates = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, int> generatedImplementationCounts = new(StringComparer.Ordinal);
         private readonly HashSet<string> pairedGeneratedDeclarations = new(StringComparer.Ordinal);
         private readonly SourceProvenanceRegistry sourceProvenance = new();
         private readonly HashSet<string> reportedProvenanceCollisions = new(StringComparer.Ordinal);
@@ -378,6 +380,25 @@ internal sealed class LogSchemaExtractor
                     "Multiple project-source LoggerMessage declarations share one stable method identity; generated pairing is ambiguous.",
                     pair.Key,
                     pair.Value.OrderBy(source => source.File, StringComparer.Ordinal).ThenBy(source => source.Line).ToArray()));
+            }
+
+            foreach (var pair in sourceCandidates.OrderBy(pair => pair.Key, StringComparer.Ordinal))
+            {
+                var generatedCount = generatedImplementationCounts.GetValueOrDefault(pair.Key);
+                var hasExactlyOneSource = sourceDeclarations.TryGetValue(pair.Key, out var declarations) && declarations.Count == 1;
+                if (hasExactlyOneSource && generatedCount == 1)
+                {
+                    events.AddRange(pair.Value.Select(candidate => candidate.Contract));
+                    continue;
+                }
+
+                var reason = generatedCount == 0
+                    ? "source LoggerMessage declaration has no generated implementation counterpart"
+                    : $"source LoggerMessage declaration has {generatedCount.ToString(CultureInfo.InvariantCulture)} generated implementation counterparts; exactly one is required";
+                foreach (var candidate in pair.Value)
+                {
+                    AddUnsupported(candidate.Source, candidate.Declaration, pair.Key, reason);
+                }
             }
 
             var generatorVersions = LoggerMessageGeneratorSemantics.DetectGeneratorVersions(compilation, cancellationToken);
@@ -463,6 +484,7 @@ internal sealed class LogSchemaExtractor
                 }
                 else if (IsGeneratedImplementation(methodSyntax))
                 {
+                    generatedImplementationCounts[declarationKey] = generatedImplementationCounts.GetValueOrDefault(declarationKey) + 1;
                     if (sourceDeclarations.TryGetValue(declarationKey, out var declarations) && declarations.Count == 1 && pairedGeneratedDeclarations.Add(declarationKey))
                     {
                         continue;
@@ -485,17 +507,28 @@ internal sealed class LogSchemaExtractor
                 }
 
                 budget.ObserveEvent();
-                events.Add(contract!);
+                if (!sourceCandidates.TryGetValue(declarationKey, out var candidates))
+                {
+                    candidates = [];
+                    sourceCandidates.Add(declarationKey, candidates);
+                }
+                candidates.Add(new SourceCandidate(source, NormalizeDeclaration(methodSyntax.ToString()), contract!));
             }
         }
 
         private void AddUnsupported(SourceLocation source, MethodDeclarationSyntax syntax, string declarationKey, string reason)
         {
+            AddUnsupported(source, NormalizeDeclaration(syntax.ToString()), declarationKey, reason);
+        }
+
+        private void AddUnsupported(SourceLocation source, string declaration, string declarationKey, string reason)
+        {
             budget.ObserveUnsupportedDeclaration();
-            unsupported.Add(new UnsupportedDeclaration(projectIdentity.Key, source, NormalizeDeclaration(syntax.ToString()), declarationKey, reason));
+            unsupported.Add(new UnsupportedDeclaration(projectIdentity.Key, source, declaration, declarationKey, reason));
         }
 
         private sealed record GeneratedSyntaxTree(SyntaxTree Tree, string LogicalPath);
+        private sealed record SourceCandidate(SourceLocation Source, string Declaration, EventContract Contract);
 
     }
 
@@ -528,6 +561,29 @@ internal sealed class LogSchemaExtractor
         {
             reason = "generic logging methods are outside the supported LoggerMessage scope";
             return false;
+        }
+        if (method.IsAsync)
+        {
+            reason = "async logging methods are outside the supported LoggerMessage scope";
+            return false;
+        }
+        foreach (var parameter in method.Parameters)
+        {
+            if (parameter.RefKind != RefKind.None)
+            {
+                reason = $"parameter '{parameter.Name}' uses ref kind '{parameter.RefKind}', which the LoggerMessage generator rejects";
+                return false;
+            }
+            if (parameter.IsParams)
+            {
+                reason = $"parameter '{parameter.Name}' uses params, which the LoggerMessage generator rejects";
+                return false;
+            }
+            if (parameter.Type.IsRefLikeType)
+            {
+                reason = $"parameter '{parameter.Name}' is a ref struct, which the LoggerMessage generator rejects";
+                return false;
+            }
         }
         if (!TryReadAttribute(attribute, method, out var eventId, out var eventName, out var level, out var message, out reason))
         {
@@ -652,27 +708,90 @@ internal sealed class LogSchemaExtractor
         return true;
     }
 
-    private static bool TryReadPlaceholders(string message, out IReadOnlyList<Placeholder> placeholders, out string? reason)
+    internal static bool TryReadPlaceholders(string message, out IReadOnlyList<Placeholder> placeholders, out string? reason)
     {
         var values = new List<Placeholder>();
         reason = null;
-        for (var index = 0; index < message.Length; index++)
+        var scanIndex = 0;
+        while (scanIndex < message.Length)
         {
-            if (message[index] == '{' && index + 1 < message.Length && message[index + 1] == '{') { index++; continue; }
-            if (message[index] == '}' && index + 1 < message.Length && message[index + 1] == '}') { index++; continue; }
-            if (message[index] != '{') continue;
-            var close = message.IndexOf('}', index + 1);
-            if (close < 0) { placeholders = []; reason = "message template contains an unterminated placeholder"; return false; }
-            var token = message[(index + 1)..close];
-            if (token.Contains('{', StringComparison.Ordinal)) { placeholders = []; reason = "message template contains a nested placeholder"; return false; }
-            var separator = token.IndexOfAny([',', ':']);
-            var name = (separator < 0 ? token : token[..separator]).Trim();
-            if (name.Length == 0) { placeholders = []; reason = "message template contains an empty placeholder"; return false; }
-            values.Add(new Placeholder(name, token));
-            index = close;
+            var open = FindBraceIndex(message, '{', scanIndex, message.Length);
+            if (open == -2)
+            {
+                placeholders = [];
+                reason = "message template contains an unmatched closing brace";
+                return false;
+            }
+            if (open == -1)
+            {
+                break;
+            }
+
+            var close = FindBraceIndex(message, '}', open + 1, message.Length);
+            if (close < 0)
+            {
+                placeholders = [];
+                reason = "message template contains an unmatched opening brace";
+                return false;
+            }
+
+            var formatDelimiter = FindIndexOfAny(message, [',', ':'], open, close);
+            var name = message.Substring(open + 1, formatDelimiter - open - 1).Trim();
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                placeholders = [];
+                reason = "message template contains an empty placeholder";
+                return false;
+            }
+
+            values.Add(new Placeholder(name, message[(open + 1)..close]));
+            scanIndex = close + 1;
         }
         placeholders = values;
         return true;
+    }
+
+    private static int FindIndexOfAny(string message, char[] characters, int startIndex, int endIndex)
+    {
+        var index = message.IndexOfAny(characters, startIndex, endIndex - startIndex);
+        return index < 0 ? endIndex : index;
+    }
+
+    private static int FindBraceIndex(string message, char searchedBrace, int startIndex, int endIndex)
+    {
+        const int wrongBraceFound = -2;
+        const int noBracesFound = -1;
+        var scanIndex = startIndex;
+        while (scanIndex < endIndex)
+        {
+            var current = message[scanIndex];
+            if (current is '{' or '}')
+            {
+                var brace = current;
+                var beforeSkip = scanIndex;
+                while (current == brace && ++scanIndex < endIndex)
+                {
+                    current = message[scanIndex];
+                }
+
+                var count = scanIndex - beforeSkip;
+                if (count % 2 != 0)
+                {
+                    if (brace == searchedBrace)
+                    {
+                        return brace == '{' ? scanIndex - 1 : beforeSkip;
+                    }
+
+                    return wrongBraceFound;
+                }
+            }
+            else
+            {
+                scanIndex++;
+            }
+        }
+
+        return noBracesFound;
     }
 
     private static string GetDeclarationKey(IMethodSymbol method) => method.ContainingType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) + "." + method.Name + "`" + method.Arity.ToString(CultureInfo.InvariantCulture) + "(" + string.Join(",", method.Parameters.Select(parameter => $"{parameter.RefKind}:{GetParameterForm(parameter.Type)}:{parameter.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)}")) + ")";

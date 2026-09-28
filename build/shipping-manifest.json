@@ -1,0 +1,814 @@
+{
+  "schemaVersion": 1,
+  "packageId": "KeelMatrix.LogSchema",
+  "publishEntries": [
+    "BuildHost-net472/cs/System.CommandLine.resources.dll",
+    "BuildHost-net472/de/System.CommandLine.resources.dll",
+    "BuildHost-net472/es/System.CommandLine.resources.dll",
+    "BuildHost-net472/fr/System.CommandLine.resources.dll",
+    "BuildHost-net472/it/System.CommandLine.resources.dll",
+    "BuildHost-net472/ja/System.CommandLine.resources.dll",
+    "BuildHost-net472/ko/System.CommandLine.resources.dll",
+    "BuildHost-net472/Microsoft.Build.Locator.dll",
+    "BuildHost-net472/Microsoft.CodeAnalysis.Workspaces.MSBuild.BuildHost.exe",
+    "BuildHost-net472/Microsoft.CodeAnalysis.Workspaces.MSBuild.BuildHost.exe.config",
+    "BuildHost-net472/Microsoft.IO.Redist.dll",
+    "BuildHost-net472/Newtonsoft.Json.dll",
+    "BuildHost-net472/pl/System.CommandLine.resources.dll",
+    "BuildHost-net472/pt-BR/System.CommandLine.resources.dll",
+    "BuildHost-net472/ru/System.CommandLine.resources.dll",
+    "BuildHost-net472/System.Buffers.dll",
+    "BuildHost-net472/System.Collections.Immutable.dll",
+    "BuildHost-net472/System.CommandLine.dll",
+    "BuildHost-net472/System.Memory.dll",
+    "BuildHost-net472/System.Numerics.Vectors.dll",
+    "BuildHost-net472/System.Runtime.CompilerServices.Unsafe.dll",
+    "BuildHost-net472/System.Threading.Tasks.Extensions.dll",
+    "BuildHost-net472/tr/System.CommandLine.resources.dll",
+    "BuildHost-net472/zh-Hans/System.CommandLine.resources.dll",
+    "BuildHost-net472/zh-Hant/System.CommandLine.resources.dll",
+    "BuildHost-netcore/cs/System.CommandLine.resources.dll",
+    "BuildHost-netcore/de/System.CommandLine.resources.dll",
+    "BuildHost-netcore/es/System.CommandLine.resources.dll",
+    "BuildHost-netcore/fr/System.CommandLine.resources.dll",
+    "BuildHost-netcore/it/System.CommandLine.resources.dll",
+    "BuildHost-netcore/ja/System.CommandLine.resources.dll",
+    "BuildHost-netcore/ko/System.CommandLine.resources.dll",
+    "BuildHost-netcore/Microsoft.Build.Locator.dll",
+    "BuildHost-netcore/Microsoft.CodeAnalysis.Workspaces.MSBuild.BuildHost.deps.json",
+    "BuildHost-netcore/Microsoft.CodeAnalysis.Workspaces.MSBuild.BuildHost.dll",
+    "BuildHost-netcore/Microsoft.CodeAnalysis.Workspaces.MSBuild.BuildHost.dll.config",
+    "BuildHost-netcore/Microsoft.CodeAnalysis.Workspaces.MSBuild.BuildHost.runtimeconfig.json",
+    "BuildHost-netcore/Newtonsoft.Json.dll",
+    "BuildHost-netcore/pl/System.CommandLine.resources.dll",
+    "BuildHost-netcore/pt-BR/System.CommandLine.resources.dll",
+    "BuildHost-netcore/ru/System.CommandLine.resources.dll",
+    "BuildHost-netcore/System.Collections.Immutable.dll",
+    "BuildHost-netcore/System.CommandLine.dll",
+    "BuildHost-netcore/tr/System.CommandLine.resources.dll",
+    "BuildHost-netcore/zh-Hans/System.CommandLine.resources.dll",
+    "BuildHost-netcore/zh-Hant/System.CommandLine.resources.dll",
+    "cs/Microsoft.CodeAnalysis.CSharp.resources.dll",
+    "cs/Microsoft.CodeAnalysis.CSharp.Workspaces.resources.dll",
+    "cs/Microsoft.CodeAnalysis.resources.dll",
+    "cs/Microsoft.CodeAnalysis.Workspaces.MSBuild.resources.dll",
+    "cs/Microsoft.CodeAnalysis.Workspaces.resources.dll",
+    "de/Microsoft.CodeAnalysis.CSharp.resources.dll",
+    "de/Microsoft.CodeAnalysis.CSharp.Workspaces.resources.dll",
+    "de/Microsoft.CodeAnalysis.resources.dll",
+    "de/Microsoft.CodeAnalysis.Workspaces.MSBuild.resources.dll",
+    "de/Microsoft.CodeAnalysis.Workspaces.resources.dll",
+    "es/Microsoft.CodeAnalysis.CSharp.resources.dll",
+    "es/Microsoft.CodeAnalysis.CSharp.Workspaces.resources.dll",
+    "es/Microsoft.CodeAnalysis.resources.dll",
+    "es/Microsoft.CodeAnalysis.Workspaces.MSBuild.resources.dll",
+    "es/Microsoft.CodeAnalysis.Workspaces.resources.dll",
+    "fr/Microsoft.CodeAnalysis.CSharp.resources.dll",
+    "fr/Microsoft.CodeAnalysis.CSharp.Workspaces.resources.dll",
+    "fr/Microsoft.CodeAnalysis.resources.dll",
+    "fr/Microsoft.CodeAnalysis.Workspaces.MSBuild.resources.dll",
+    "fr/Microsoft.CodeAnalysis.Workspaces.resources.dll",
+    "Humanizer.dll",
+    "it/Microsoft.CodeAnalysis.CSharp.resources.dll",
+    "it/Microsoft.CodeAnalysis.CSharp.Workspaces.resources.dll",
+    "it/Microsoft.CodeAnalysis.resources.dll",
+    "it/Microsoft.CodeAnalysis.Workspaces.MSBuild.resources.dll",
+    "it/Microsoft.CodeAnalysis.Workspaces.resources.dll",
+    "ja/Microsoft.CodeAnalysis.CSharp.resources.dll",
+    "ja/Microsoft.CodeAnalysis.CSharp.Workspaces.resources.dll",
+    "ja/Microsoft.CodeAnalysis.resources.dll",
+    "ja/Microsoft.CodeAnalysis.Workspaces.MSBuild.resources.dll",
+    "ja/Microsoft.CodeAnalysis.Workspaces.resources.dll",
+    "KeelMatrix.LogSchema.Core.dll",
+    "KeelMatrix.LogSchema.Core.pdb",
+    "KeelMatrix.LogSchema.deps.json",
+    "KeelMatrix.LogSchema.dll",
+    "KeelMatrix.LogSchema",
+    "KeelMatrix.LogSchema.pdb",
+    "KeelMatrix.LogSchema.runtimeconfig.json",
+    "ko/Microsoft.CodeAnalysis.CSharp.resources.dll",
+    "ko/Microsoft.CodeAnalysis.CSharp.Workspaces.resources.dll",
+    "ko/Microsoft.CodeAnalysis.resources.dll",
+    "ko/Microsoft.CodeAnalysis.Workspaces.MSBuild.resources.dll",
+    "ko/Microsoft.CodeAnalysis.Workspaces.resources.dll",
+    "Microsoft.Build.Locator.dll",
+    "Microsoft.CodeAnalysis.CSharp.dll",
+    "Microsoft.CodeAnalysis.CSharp.Workspaces.dll",
+    "Microsoft.CodeAnalysis.dll",
+    "Microsoft.CodeAnalysis.ExternalAccess.RazorCompiler.dll",
+    "Microsoft.CodeAnalysis.Workspaces.dll",
+    "Microsoft.CodeAnalysis.Workspaces.MSBuild.dll",
+    "Microsoft.Extensions.DependencyInjection.Abstractions.dll",
+    "Microsoft.Extensions.DependencyInjection.dll",
+    "Microsoft.Extensions.Logging.Abstractions.dll",
+    "Microsoft.Extensions.Logging.dll",
+    "Microsoft.Extensions.Options.dll",
+    "Microsoft.Extensions.Primitives.dll",
+    "Newtonsoft.Json.dll",
+    "pl/Microsoft.CodeAnalysis.CSharp.resources.dll",
+    "pl/Microsoft.CodeAnalysis.CSharp.Workspaces.resources.dll",
+    "pl/Microsoft.CodeAnalysis.resources.dll",
+    "pl/Microsoft.CodeAnalysis.Workspaces.MSBuild.resources.dll",
+    "pl/Microsoft.CodeAnalysis.Workspaces.resources.dll",
+    "pt-BR/Microsoft.CodeAnalysis.CSharp.resources.dll",
+    "pt-BR/Microsoft.CodeAnalysis.CSharp.Workspaces.resources.dll",
+    "pt-BR/Microsoft.CodeAnalysis.resources.dll",
+    "pt-BR/Microsoft.CodeAnalysis.Workspaces.MSBuild.resources.dll",
+    "pt-BR/Microsoft.CodeAnalysis.Workspaces.resources.dll",
+    "ru/Microsoft.CodeAnalysis.CSharp.resources.dll",
+    "ru/Microsoft.CodeAnalysis.CSharp.Workspaces.resources.dll",
+    "ru/Microsoft.CodeAnalysis.resources.dll",
+    "ru/Microsoft.CodeAnalysis.Workspaces.MSBuild.resources.dll",
+    "ru/Microsoft.CodeAnalysis.Workspaces.resources.dll",
+    "runtimes/browser/lib/net8.0/System.Text.Encodings.Web.dll",
+    "runtimes/win/lib/net7.0/System.Security.Cryptography.Pkcs.dll",
+    "runtimes/win/lib/net8.0/System.Diagnostics.EventLog.dll",
+    "runtimes/win/lib/net8.0/System.Diagnostics.EventLog.Messages.dll",
+    "runtimes/win/lib/net8.0/System.Windows.Extensions.dll",
+    "System.CodeDom.dll",
+    "System.Collections.Immutable.dll",
+    "System.Composition.AttributedModel.dll",
+    "System.Composition.Convention.dll",
+    "System.Composition.Hosting.dll",
+    "System.Composition.Runtime.dll",
+    "System.Composition.TypedParts.dll",
+    "System.Configuration.ConfigurationManager.dll",
+    "System.Diagnostics.DiagnosticSource.dll",
+    "System.Diagnostics.EventLog.dll",
+    "System.Formats.Nrbf.dll",
+    "System.IO.Pipelines.dll",
+    "System.Reflection.Metadata.dll",
+    "System.Resources.Extensions.dll",
+    "System.Security.Cryptography.Pkcs.dll",
+    "System.Security.Cryptography.ProtectedData.dll",
+    "System.Security.Cryptography.Xml.dll",
+    "System.Security.Permissions.dll",
+    "System.Text.Encodings.Web.dll",
+    "System.Text.Json.dll",
+    "System.Threading.Tasks.Dataflow.dll",
+    "System.Windows.Extensions.dll",
+    "tr/Microsoft.CodeAnalysis.CSharp.resources.dll",
+    "tr/Microsoft.CodeAnalysis.CSharp.Workspaces.resources.dll",
+    "tr/Microsoft.CodeAnalysis.resources.dll",
+    "tr/Microsoft.CodeAnalysis.Workspaces.MSBuild.resources.dll",
+    "tr/Microsoft.CodeAnalysis.Workspaces.resources.dll",
+    "zh-Hans/Microsoft.CodeAnalysis.CSharp.resources.dll",
+    "zh-Hans/Microsoft.CodeAnalysis.CSharp.Workspaces.resources.dll",
+    "zh-Hans/Microsoft.CodeAnalysis.resources.dll",
+    "zh-Hans/Microsoft.CodeAnalysis.Workspaces.MSBuild.resources.dll",
+    "zh-Hans/Microsoft.CodeAnalysis.Workspaces.resources.dll",
+    "zh-Hant/Microsoft.CodeAnalysis.CSharp.resources.dll",
+    "zh-Hant/Microsoft.CodeAnalysis.CSharp.Workspaces.resources.dll",
+    "zh-Hant/Microsoft.CodeAnalysis.resources.dll",
+    "zh-Hant/Microsoft.CodeAnalysis.Workspaces.MSBuild.resources.dll",
+    "zh-Hant/Microsoft.CodeAnalysis.Workspaces.resources.dll"
+  ],
+  "publishAliases": [
+    {
+      "actual": "KeelMatrix.LogSchema.exe",
+      "canonical": "KeelMatrix.LogSchema"
+    }
+  ],
+  "packageEntries": [
+    "_rels/.rels",
+    "[Content_Types].xml",
+    "icon.png",
+    "KeelMatrix.LogSchema.nuspec",
+    "package/services/metadata/core-properties/nuget.psmdcp",
+    "README.md",
+    "tools/net8.0/any/BuildHost-net472/cs/System.CommandLine.resources.dll",
+    "tools/net8.0/any/BuildHost-net472/de/System.CommandLine.resources.dll",
+    "tools/net8.0/any/BuildHost-net472/es/System.CommandLine.resources.dll",
+    "tools/net8.0/any/BuildHost-net472/fr/System.CommandLine.resources.dll",
+    "tools/net8.0/any/BuildHost-net472/it/System.CommandLine.resources.dll",
+    "tools/net8.0/any/BuildHost-net472/ja/System.CommandLine.resources.dll",
+    "tools/net8.0/any/BuildHost-net472/ko/System.CommandLine.resources.dll",
+    "tools/net8.0/any/BuildHost-net472/Microsoft.Build.Locator.dll",
+    "tools/net8.0/any/BuildHost-net472/Microsoft.CodeAnalysis.Workspaces.MSBuild.BuildHost.exe",
+    "tools/net8.0/any/BuildHost-net472/Microsoft.CodeAnalysis.Workspaces.MSBuild.BuildHost.exe.config",
+    "tools/net8.0/any/BuildHost-net472/Microsoft.IO.Redist.dll",
+    "tools/net8.0/any/BuildHost-net472/Newtonsoft.Json.dll",
+    "tools/net8.0/any/BuildHost-net472/pl/System.CommandLine.resources.dll",
+    "tools/net8.0/any/BuildHost-net472/pt-BR/System.CommandLine.resources.dll",
+    "tools/net8.0/any/BuildHost-net472/ru/System.CommandLine.resources.dll",
+    "tools/net8.0/any/BuildHost-net472/System.Buffers.dll",
+    "tools/net8.0/any/BuildHost-net472/System.Collections.Immutable.dll",
+    "tools/net8.0/any/BuildHost-net472/System.CommandLine.dll",
+    "tools/net8.0/any/BuildHost-net472/System.Memory.dll",
+    "tools/net8.0/any/BuildHost-net472/System.Numerics.Vectors.dll",
+    "tools/net8.0/any/BuildHost-net472/System.Runtime.CompilerServices.Unsafe.dll",
+    "tools/net8.0/any/BuildHost-net472/System.Threading.Tasks.Extensions.dll",
+    "tools/net8.0/any/BuildHost-net472/tr/System.CommandLine.resources.dll",
+    "tools/net8.0/any/BuildHost-net472/zh-Hans/System.CommandLine.resources.dll",
+    "tools/net8.0/any/BuildHost-net472/zh-Hant/System.CommandLine.resources.dll",
+    "tools/net8.0/any/BuildHost-netcore/cs/System.CommandLine.resources.dll",
+    "tools/net8.0/any/BuildHost-netcore/de/System.CommandLine.resources.dll",
+    "tools/net8.0/any/BuildHost-netcore/es/System.CommandLine.resources.dll",
+    "tools/net8.0/any/BuildHost-netcore/fr/System.CommandLine.resources.dll",
+    "tools/net8.0/any/BuildHost-netcore/it/System.CommandLine.resources.dll",
+    "tools/net8.0/any/BuildHost-netcore/ja/System.CommandLine.resources.dll",
+    "tools/net8.0/any/BuildHost-netcore/ko/System.CommandLine.resources.dll",
+    "tools/net8.0/any/BuildHost-netcore/Microsoft.Build.Locator.dll",
+    "tools/net8.0/any/BuildHost-netcore/Microsoft.CodeAnalysis.Workspaces.MSBuild.BuildHost.deps.json",
+    "tools/net8.0/any/BuildHost-netcore/Microsoft.CodeAnalysis.Workspaces.MSBuild.BuildHost.dll",
+    "tools/net8.0/any/BuildHost-netcore/Microsoft.CodeAnalysis.Workspaces.MSBuild.BuildHost.dll.config",
+    "tools/net8.0/any/BuildHost-netcore/Microsoft.CodeAnalysis.Workspaces.MSBuild.BuildHost.runtimeconfig.json",
+    "tools/net8.0/any/BuildHost-netcore/Newtonsoft.Json.dll",
+    "tools/net8.0/any/BuildHost-netcore/pl/System.CommandLine.resources.dll",
+    "tools/net8.0/any/BuildHost-netcore/pt-BR/System.CommandLine.resources.dll",
+    "tools/net8.0/any/BuildHost-netcore/ru/System.CommandLine.resources.dll",
+    "tools/net8.0/any/BuildHost-netcore/System.Collections.Immutable.dll",
+    "tools/net8.0/any/BuildHost-netcore/System.CommandLine.dll",
+    "tools/net8.0/any/BuildHost-netcore/tr/System.CommandLine.resources.dll",
+    "tools/net8.0/any/BuildHost-netcore/zh-Hans/System.CommandLine.resources.dll",
+    "tools/net8.0/any/BuildHost-netcore/zh-Hant/System.CommandLine.resources.dll",
+    "tools/net8.0/any/cs/Microsoft.CodeAnalysis.CSharp.resources.dll",
+    "tools/net8.0/any/cs/Microsoft.CodeAnalysis.CSharp.Workspaces.resources.dll",
+    "tools/net8.0/any/cs/Microsoft.CodeAnalysis.resources.dll",
+    "tools/net8.0/any/cs/Microsoft.CodeAnalysis.Workspaces.MSBuild.resources.dll",
+    "tools/net8.0/any/cs/Microsoft.CodeAnalysis.Workspaces.resources.dll",
+    "tools/net8.0/any/de/Microsoft.CodeAnalysis.CSharp.resources.dll",
+    "tools/net8.0/any/de/Microsoft.CodeAnalysis.CSharp.Workspaces.resources.dll",
+    "tools/net8.0/any/de/Microsoft.CodeAnalysis.resources.dll",
+    "tools/net8.0/any/de/Microsoft.CodeAnalysis.Workspaces.MSBuild.resources.dll",
+    "tools/net8.0/any/de/Microsoft.CodeAnalysis.Workspaces.resources.dll",
+    "tools/net8.0/any/DotnetToolSettings.xml",
+    "tools/net8.0/any/es/Microsoft.CodeAnalysis.CSharp.resources.dll",
+    "tools/net8.0/any/es/Microsoft.CodeAnalysis.CSharp.Workspaces.resources.dll",
+    "tools/net8.0/any/es/Microsoft.CodeAnalysis.resources.dll",
+    "tools/net8.0/any/es/Microsoft.CodeAnalysis.Workspaces.MSBuild.resources.dll",
+    "tools/net8.0/any/es/Microsoft.CodeAnalysis.Workspaces.resources.dll",
+    "tools/net8.0/any/fr/Microsoft.CodeAnalysis.CSharp.resources.dll",
+    "tools/net8.0/any/fr/Microsoft.CodeAnalysis.CSharp.Workspaces.resources.dll",
+    "tools/net8.0/any/fr/Microsoft.CodeAnalysis.resources.dll",
+    "tools/net8.0/any/fr/Microsoft.CodeAnalysis.Workspaces.MSBuild.resources.dll",
+    "tools/net8.0/any/fr/Microsoft.CodeAnalysis.Workspaces.resources.dll",
+    "tools/net8.0/any/Humanizer.dll",
+    "tools/net8.0/any/it/Microsoft.CodeAnalysis.CSharp.resources.dll",
+    "tools/net8.0/any/it/Microsoft.CodeAnalysis.CSharp.Workspaces.resources.dll",
+    "tools/net8.0/any/it/Microsoft.CodeAnalysis.resources.dll",
+    "tools/net8.0/any/it/Microsoft.CodeAnalysis.Workspaces.MSBuild.resources.dll",
+    "tools/net8.0/any/it/Microsoft.CodeAnalysis.Workspaces.resources.dll",
+    "tools/net8.0/any/ja/Microsoft.CodeAnalysis.CSharp.resources.dll",
+    "tools/net8.0/any/ja/Microsoft.CodeAnalysis.CSharp.Workspaces.resources.dll",
+    "tools/net8.0/any/ja/Microsoft.CodeAnalysis.resources.dll",
+    "tools/net8.0/any/ja/Microsoft.CodeAnalysis.Workspaces.MSBuild.resources.dll",
+    "tools/net8.0/any/ja/Microsoft.CodeAnalysis.Workspaces.resources.dll",
+    "tools/net8.0/any/KeelMatrix.LogSchema.Core.dll",
+    "tools/net8.0/any/KeelMatrix.LogSchema.Core.pdb",
+    "tools/net8.0/any/KeelMatrix.LogSchema.deps.json",
+    "tools/net8.0/any/KeelMatrix.LogSchema.dll",
+    "tools/net8.0/any/KeelMatrix.LogSchema.pdb",
+    "tools/net8.0/any/KeelMatrix.LogSchema.runtimeconfig.json",
+    "tools/net8.0/any/ko/Microsoft.CodeAnalysis.CSharp.resources.dll",
+    "tools/net8.0/any/ko/Microsoft.CodeAnalysis.CSharp.Workspaces.resources.dll",
+    "tools/net8.0/any/ko/Microsoft.CodeAnalysis.resources.dll",
+    "tools/net8.0/any/ko/Microsoft.CodeAnalysis.Workspaces.MSBuild.resources.dll",
+    "tools/net8.0/any/ko/Microsoft.CodeAnalysis.Workspaces.resources.dll",
+    "tools/net8.0/any/Microsoft.Build.Locator.dll",
+    "tools/net8.0/any/Microsoft.CodeAnalysis.CSharp.dll",
+    "tools/net8.0/any/Microsoft.CodeAnalysis.CSharp.Workspaces.dll",
+    "tools/net8.0/any/Microsoft.CodeAnalysis.dll",
+    "tools/net8.0/any/Microsoft.CodeAnalysis.ExternalAccess.RazorCompiler.dll",
+    "tools/net8.0/any/Microsoft.CodeAnalysis.Workspaces.dll",
+    "tools/net8.0/any/Microsoft.CodeAnalysis.Workspaces.MSBuild.dll",
+    "tools/net8.0/any/Microsoft.Extensions.DependencyInjection.Abstractions.dll",
+    "tools/net8.0/any/Microsoft.Extensions.DependencyInjection.dll",
+    "tools/net8.0/any/Microsoft.Extensions.Logging.Abstractions.dll",
+    "tools/net8.0/any/Microsoft.Extensions.Logging.dll",
+    "tools/net8.0/any/Microsoft.Extensions.Options.dll",
+    "tools/net8.0/any/Microsoft.Extensions.Primitives.dll",
+    "tools/net8.0/any/Newtonsoft.Json.dll",
+    "tools/net8.0/any/pl/Microsoft.CodeAnalysis.CSharp.resources.dll",
+    "tools/net8.0/any/pl/Microsoft.CodeAnalysis.CSharp.Workspaces.resources.dll",
+    "tools/net8.0/any/pl/Microsoft.CodeAnalysis.resources.dll",
+    "tools/net8.0/any/pl/Microsoft.CodeAnalysis.Workspaces.MSBuild.resources.dll",
+    "tools/net8.0/any/pl/Microsoft.CodeAnalysis.Workspaces.resources.dll",
+    "tools/net8.0/any/pt-BR/Microsoft.CodeAnalysis.CSharp.resources.dll",
+    "tools/net8.0/any/pt-BR/Microsoft.CodeAnalysis.CSharp.Workspaces.resources.dll",
+    "tools/net8.0/any/pt-BR/Microsoft.CodeAnalysis.resources.dll",
+    "tools/net8.0/any/pt-BR/Microsoft.CodeAnalysis.Workspaces.MSBuild.resources.dll",
+    "tools/net8.0/any/pt-BR/Microsoft.CodeAnalysis.Workspaces.resources.dll",
+    "tools/net8.0/any/ru/Microsoft.CodeAnalysis.CSharp.resources.dll",
+    "tools/net8.0/any/ru/Microsoft.CodeAnalysis.CSharp.Workspaces.resources.dll",
+    "tools/net8.0/any/ru/Microsoft.CodeAnalysis.resources.dll",
+    "tools/net8.0/any/ru/Microsoft.CodeAnalysis.Workspaces.MSBuild.resources.dll",
+    "tools/net8.0/any/ru/Microsoft.CodeAnalysis.Workspaces.resources.dll",
+    "tools/net8.0/any/runtimes/browser/lib/net8.0/System.Text.Encodings.Web.dll",
+    "tools/net8.0/any/runtimes/win/lib/net7.0/System.Security.Cryptography.Pkcs.dll",
+    "tools/net8.0/any/runtimes/win/lib/net8.0/System.Diagnostics.EventLog.dll",
+    "tools/net8.0/any/runtimes/win/lib/net8.0/System.Diagnostics.EventLog.Messages.dll",
+    "tools/net8.0/any/runtimes/win/lib/net8.0/System.Windows.Extensions.dll",
+    "tools/net8.0/any/System.CodeDom.dll",
+    "tools/net8.0/any/System.Collections.Immutable.dll",
+    "tools/net8.0/any/System.Composition.AttributedModel.dll",
+    "tools/net8.0/any/System.Composition.Convention.dll",
+    "tools/net8.0/any/System.Composition.Hosting.dll",
+    "tools/net8.0/any/System.Composition.Runtime.dll",
+    "tools/net8.0/any/System.Composition.TypedParts.dll",
+    "tools/net8.0/any/System.Configuration.ConfigurationManager.dll",
+    "tools/net8.0/any/System.Diagnostics.DiagnosticSource.dll",
+    "tools/net8.0/any/System.Diagnostics.EventLog.dll",
+    "tools/net8.0/any/System.Formats.Nrbf.dll",
+    "tools/net8.0/any/System.IO.Pipelines.dll",
+    "tools/net8.0/any/System.Reflection.Metadata.dll",
+    "tools/net8.0/any/System.Resources.Extensions.dll",
+    "tools/net8.0/any/System.Security.Cryptography.Pkcs.dll",
+    "tools/net8.0/any/System.Security.Cryptography.ProtectedData.dll",
+    "tools/net8.0/any/System.Security.Cryptography.Xml.dll",
+    "tools/net8.0/any/System.Security.Permissions.dll",
+    "tools/net8.0/any/System.Text.Encodings.Web.dll",
+    "tools/net8.0/any/System.Text.Json.dll",
+    "tools/net8.0/any/System.Threading.Tasks.Dataflow.dll",
+    "tools/net8.0/any/System.Windows.Extensions.dll",
+    "tools/net8.0/any/tr/Microsoft.CodeAnalysis.CSharp.resources.dll",
+    "tools/net8.0/any/tr/Microsoft.CodeAnalysis.CSharp.Workspaces.resources.dll",
+    "tools/net8.0/any/tr/Microsoft.CodeAnalysis.resources.dll",
+    "tools/net8.0/any/tr/Microsoft.CodeAnalysis.Workspaces.MSBuild.resources.dll",
+    "tools/net8.0/any/tr/Microsoft.CodeAnalysis.Workspaces.resources.dll",
+    "tools/net8.0/any/zh-Hans/Microsoft.CodeAnalysis.CSharp.resources.dll",
+    "tools/net8.0/any/zh-Hans/Microsoft.CodeAnalysis.CSharp.Workspaces.resources.dll",
+    "tools/net8.0/any/zh-Hans/Microsoft.CodeAnalysis.resources.dll",
+    "tools/net8.0/any/zh-Hans/Microsoft.CodeAnalysis.Workspaces.MSBuild.resources.dll",
+    "tools/net8.0/any/zh-Hans/Microsoft.CodeAnalysis.Workspaces.resources.dll",
+    "tools/net8.0/any/zh-Hant/Microsoft.CodeAnalysis.CSharp.resources.dll",
+    "tools/net8.0/any/zh-Hant/Microsoft.CodeAnalysis.CSharp.Workspaces.resources.dll",
+    "tools/net8.0/any/zh-Hant/Microsoft.CodeAnalysis.resources.dll",
+    "tools/net8.0/any/zh-Hant/Microsoft.CodeAnalysis.Workspaces.MSBuild.resources.dll",
+    "tools/net8.0/any/zh-Hant/Microsoft.CodeAnalysis.Workspaces.resources.dll"
+  ],
+  "symbolEntries": [
+    "_rels/.rels",
+    "[Content_Types].xml",
+    "KeelMatrix.LogSchema.nuspec",
+    "package/services/metadata/core-properties/nuget.psmdcp",
+    "tools/net8.0/any/KeelMatrix.LogSchema.Core.pdb",
+    "tools/net8.0/any/KeelMatrix.LogSchema.pdb"
+  ],
+  "dependencies": {
+    "core": [
+      {
+        "id": "Humanizer.Core",
+        "version": "2.14.1",
+        "type": "package"
+      },
+      {
+        "id": "System.Composition.Runtime",
+        "version": "9.0.0",
+        "type": "package"
+      },
+      {
+        "id": "System.Composition.TypedParts",
+        "version": "9.0.0",
+        "type": "package"
+      },
+      {
+        "id": "System.Configuration.ConfigurationManager",
+        "version": "9.0.0",
+        "type": "package"
+      },
+      {
+        "id": "System.Diagnostics.DiagnosticSource",
+        "version": "10.0.1",
+        "type": "package"
+      },
+      {
+        "id": "System.Diagnostics.EventLog",
+        "version": "9.0.0",
+        "type": "package"
+      },
+      {
+        "id": "System.Formats.Asn1",
+        "version": "9.0.1",
+        "type": "package"
+      },
+      {
+        "id": "System.Formats.Nrbf",
+        "version": "9.0.0",
+        "type": "package"
+      },
+      {
+        "id": "System.IO.Pipelines",
+        "version": "9.0.0",
+        "type": "package"
+      },
+      {
+        "id": "System.Memory",
+        "version": "4.6.0",
+        "type": "package"
+      },
+      {
+        "id": "System.Reflection.Metadata",
+        "version": "9.0.0",
+        "type": "package"
+      },
+      {
+        "id": "System.Composition.Hosting",
+        "version": "9.0.0",
+        "type": "package"
+      },
+      {
+        "id": "System.Reflection.MetadataLoadContext",
+        "version": "9.0.0",
+        "type": "package"
+      },
+      {
+        "id": "System.Runtime.CompilerServices.Unsafe",
+        "version": "6.1.0",
+        "type": "package"
+      },
+      {
+        "id": "System.Security.Cryptography.Pkcs",
+        "version": "7.0.2",
+        "type": "package"
+      },
+      {
+        "id": "System.Security.Cryptography.ProtectedData",
+        "version": "9.0.0",
+        "type": "package"
+      },
+      {
+        "id": "System.Security.Cryptography.Xml",
+        "version": "7.0.1",
+        "type": "package"
+      },
+      {
+        "id": "System.Security.Permissions",
+        "version": "9.0.0",
+        "type": "package"
+      },
+      {
+        "id": "System.Security.Principal.Windows",
+        "version": "5.0.0",
+        "type": "package"
+      },
+      {
+        "id": "System.Text.Encodings.Web",
+        "version": "9.0.0",
+        "type": "package"
+      },
+      {
+        "id": "System.Text.Json",
+        "version": "9.0.0",
+        "type": "package"
+      },
+      {
+        "id": "System.Threading.Channels",
+        "version": "7.0.0",
+        "type": "package"
+      },
+      {
+        "id": "System.Threading.Tasks.Dataflow",
+        "version": "9.0.0",
+        "type": "package"
+      },
+      {
+        "id": "System.Resources.Extensions",
+        "version": "9.0.0",
+        "type": "package"
+      },
+      {
+        "id": "System.Composition.Convention",
+        "version": "9.0.0",
+        "type": "package"
+      },
+      {
+        "id": "System.Composition.AttributedModel",
+        "version": "9.0.0",
+        "type": "package"
+      },
+      {
+        "id": "System.Composition",
+        "version": "9.0.0",
+        "type": "package"
+      },
+      {
+        "id": "Microsoft.Build",
+        "version": "18.0.2",
+        "type": "package"
+      },
+      {
+        "id": "Microsoft.Build.Framework",
+        "version": "18.0.2",
+        "type": "package"
+      },
+      {
+        "id": "Microsoft.Build.Locator",
+        "version": "1.11.2",
+        "type": "package"
+      },
+      {
+        "id": "Microsoft.Build.Tasks.Core",
+        "version": "18.0.2",
+        "type": "package"
+      },
+      {
+        "id": "Microsoft.Build.Utilities.Core",
+        "version": "18.0.2",
+        "type": "package"
+      },
+      {
+        "id": "Microsoft.CodeAnalysis.Analyzers",
+        "version": "3.11.0",
+        "type": "package"
+      },
+      {
+        "id": "Microsoft.CodeAnalysis.Common",
+        "version": "4.14.0",
+        "type": "package"
+      },
+      {
+        "id": "Microsoft.CodeAnalysis.CSharp",
+        "version": "4.14.0",
+        "type": "package"
+      },
+      {
+        "id": "Microsoft.CodeAnalysis.CSharp.Workspaces",
+        "version": "4.14.0",
+        "type": "package"
+      },
+      {
+        "id": "Microsoft.CodeAnalysis.Workspaces.Common",
+        "version": "4.14.0",
+        "type": "package"
+      },
+      {
+        "id": "Microsoft.CodeAnalysis.Workspaces.MSBuild",
+        "version": "4.14.0",
+        "type": "package"
+      },
+      {
+        "id": "Microsoft.Extensions.DependencyInjection",
+        "version": "9.0.0",
+        "type": "package"
+      },
+      {
+        "id": "Microsoft.Extensions.DependencyInjection.Abstractions",
+        "version": "10.0.1",
+        "type": "package"
+      },
+      {
+        "id": "Microsoft.Extensions.Logging",
+        "version": "9.0.0",
+        "type": "package"
+      },
+      {
+        "id": "Microsoft.Extensions.Logging.Abstractions",
+        "version": "10.0.1",
+        "type": "package"
+      },
+      {
+        "id": "Microsoft.Extensions.Options",
+        "version": "9.0.0",
+        "type": "package"
+      },
+      {
+        "id": "Microsoft.Extensions.Primitives",
+        "version": "9.0.0",
+        "type": "package"
+      },
+      {
+        "id": "Microsoft.IO.Redist",
+        "version": "6.1.0",
+        "type": "package"
+      },
+      {
+        "id": "Microsoft.NET.StringTools",
+        "version": "18.0.2",
+        "type": "package"
+      },
+      {
+        "id": "Newtonsoft.Json",
+        "version": "13.0.3",
+        "type": "package"
+      },
+      {
+        "id": "System.Buffers",
+        "version": "4.6.0",
+        "type": "package"
+      },
+      {
+        "id": "System.CodeDom",
+        "version": "7.0.0",
+        "type": "package"
+      },
+      {
+        "id": "System.Collections.Immutable",
+        "version": "9.0.0",
+        "type": "package"
+      },
+      {
+        "id": "System.Threading.Tasks.Extensions",
+        "version": "4.6.0",
+        "type": "package"
+      },
+      {
+        "id": "System.Windows.Extensions",
+        "version": "9.0.0",
+        "type": "package"
+      }
+    ],
+    "tool": [
+      {
+        "id": "Humanizer.Core",
+        "version": "2.14.1",
+        "type": "package"
+      },
+      {
+        "id": "System.Composition.TypedParts",
+        "version": "9.0.0",
+        "type": "package"
+      },
+      {
+        "id": "System.Configuration.ConfigurationManager",
+        "version": "9.0.0",
+        "type": "package"
+      },
+      {
+        "id": "System.Diagnostics.DiagnosticSource",
+        "version": "10.0.1",
+        "type": "package"
+      },
+      {
+        "id": "System.Diagnostics.EventLog",
+        "version": "9.0.0",
+        "type": "package"
+      },
+      {
+        "id": "System.Formats.Nrbf",
+        "version": "9.0.0",
+        "type": "package"
+      },
+      {
+        "id": "System.IO.Pipelines",
+        "version": "9.0.0",
+        "type": "package"
+      },
+      {
+        "id": "System.Reflection.Metadata",
+        "version": "9.0.0",
+        "type": "package"
+      },
+      {
+        "id": "System.Composition.Runtime",
+        "version": "9.0.0",
+        "type": "package"
+      },
+      {
+        "id": "System.Resources.Extensions",
+        "version": "9.0.0",
+        "type": "package"
+      },
+      {
+        "id": "System.Security.Cryptography.ProtectedData",
+        "version": "9.0.0",
+        "type": "package"
+      },
+      {
+        "id": "System.Security.Cryptography.Xml",
+        "version": "7.0.1",
+        "type": "package"
+      },
+      {
+        "id": "System.Security.Permissions",
+        "version": "9.0.0",
+        "type": "package"
+      },
+      {
+        "id": "System.Text.Encodings.Web",
+        "version": "9.0.0",
+        "type": "package"
+      },
+      {
+        "id": "System.Text.Json",
+        "version": "9.0.0",
+        "type": "package"
+      },
+      {
+        "id": "System.Threading.Channels",
+        "version": "7.0.0",
+        "type": "package"
+      },
+      {
+        "id": "System.Threading.Tasks.Dataflow",
+        "version": "9.0.0",
+        "type": "package"
+      },
+      {
+        "id": "System.Security.Cryptography.Pkcs",
+        "version": "7.0.2",
+        "type": "package"
+      },
+      {
+        "id": "System.Composition.Hosting",
+        "version": "9.0.0",
+        "type": "package"
+      },
+      {
+        "id": "System.Composition.Convention",
+        "version": "9.0.0",
+        "type": "package"
+      },
+      {
+        "id": "System.Composition.AttributedModel",
+        "version": "9.0.0",
+        "type": "package"
+      },
+      {
+        "id": "Microsoft.Build.Locator",
+        "version": "1.11.2",
+        "type": "package"
+      },
+      {
+        "id": "Microsoft.CodeAnalysis.Analyzers",
+        "version": "3.11.0",
+        "type": "package"
+      },
+      {
+        "id": "Microsoft.CodeAnalysis.Common",
+        "version": "4.14.0",
+        "type": "package"
+      },
+      {
+        "id": "Microsoft.CodeAnalysis.CSharp",
+        "version": "4.14.0",
+        "type": "package"
+      },
+      {
+        "id": "Microsoft.CodeAnalysis.CSharp.Workspaces",
+        "version": "4.14.0",
+        "type": "package"
+      },
+      {
+        "id": "Microsoft.CodeAnalysis.Workspaces.Common",
+        "version": "4.14.0",
+        "type": "package"
+      },
+      {
+        "id": "Microsoft.CodeAnalysis.Workspaces.MSBuild",
+        "version": "4.14.0",
+        "type": "package"
+      },
+      {
+        "id": "Microsoft.Extensions.DependencyInjection",
+        "version": "9.0.0",
+        "type": "package"
+      },
+      {
+        "id": "Microsoft.Extensions.DependencyInjection.Abstractions",
+        "version": "10.0.1",
+        "type": "package"
+      },
+      {
+        "id": "Microsoft.Extensions.Logging",
+        "version": "9.0.0",
+        "type": "package"
+      },
+      {
+        "id": "Microsoft.Extensions.Logging.Abstractions",
+        "version": "10.0.1",
+        "type": "package"
+      },
+      {
+        "id": "Microsoft.Extensions.Options",
+        "version": "9.0.0",
+        "type": "package"
+      },
+      {
+        "id": "Microsoft.Extensions.Primitives",
+        "version": "9.0.0",
+        "type": "package"
+      },
+      {
+        "id": "Newtonsoft.Json",
+        "version": "13.0.3",
+        "type": "package"
+      },
+      {
+        "id": "System.CodeDom",
+        "version": "7.0.0",
+        "type": "package"
+      },
+      {
+        "id": "System.Collections.Immutable",
+        "version": "9.0.0",
+        "type": "package"
+      },
+      {
+        "id": "System.Composition",
+        "version": "9.0.0",
+        "type": "package"
+      },
+      {
+        "id": "System.Windows.Extensions",
+        "version": "9.0.0",
+        "type": "package"
+      },
+      {
+        "id": "KeelMatrix.LogSchema.Core",
+        "version": "0.1.0",
+        "type": "project"
+      }
+    ]
+  }
+}

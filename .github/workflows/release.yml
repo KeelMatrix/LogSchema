@@ -165,6 +165,7 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           $version = '${{ needs.validate.outputs.release_version }}'
           gh release create '${{ github.ref_name }}' `

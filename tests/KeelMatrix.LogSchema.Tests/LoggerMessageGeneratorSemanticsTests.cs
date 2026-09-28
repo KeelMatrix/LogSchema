@@ -9,12 +9,16 @@ public sealed class LoggerMessageGeneratorSemanticsTests
         {
             LoggerMessageGeneratorSemantics.SupportedGeneratorAssemblyVersion
         }));
+        Assert.True(LoggerMessageGeneratorSemantics.IsSupportedGeneratorVersion(new HashSet<string>(StringComparer.Ordinal)
+        {
+            LoggerMessageGeneratorSemantics.CurrentStableGeneratorAssemblyVersion
+        }));
         Assert.False(LoggerMessageGeneratorSemantics.IsSupportedGeneratorVersion(new HashSet<string>(StringComparer.Ordinal)));
         Assert.False(LoggerMessageGeneratorSemantics.IsSupportedGeneratorVersion(new HashSet<string>(StringComparer.Ordinal) { "10.0.0.0" }));
         Assert.False(LoggerMessageGeneratorSemantics.IsSupportedGeneratorVersion(new HashSet<string>(StringComparer.Ordinal)
         {
             LoggerMessageGeneratorSemantics.SupportedGeneratorAssemblyVersion,
-            "10.0.0.0"
+            LoggerMessageGeneratorSemantics.CurrentStableGeneratorAssemblyVersion
         }));
     }
 

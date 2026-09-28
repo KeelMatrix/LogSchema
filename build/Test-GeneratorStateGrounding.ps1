@@ -12,6 +12,7 @@ else {
 }
 
 $project = Join-Path $RepositoryRoot 'tests/PackageConsumerFixture/PackageConsumerFixture.csproj'
+$currentStableProject = Join-Path $RepositoryRoot 'fixtures/Phase0.CurrentStable/Phase0.CurrentStable.csproj'
 $outputRoot = Join-Path ([IO.Path]::GetTempPath()) ('logschema-generator-grounding-' + [Guid]::NewGuid().ToString('N'))
 
 function Assert-That {
@@ -38,6 +39,20 @@ try {
     Assert-That ($generatedFiles.Count -gt 0) 'the pinned LoggerMessage generator must emit inspectable source'
     $generated = ($generatedFiles | ForEach-Object { Get-Content -Raw -LiteralPath $_.FullName }) -join [Environment]::NewLine
     Assert-That ($generated.Contains('GeneratedCodeAttribute("Microsoft.Extensions.Logging.Generators", "10.0.13.7005")', [StringComparison]::Ordinal)) 'the fixture must be grounded against generator assembly version 10.0.13.7005'
+
+    $currentStableOutput = Join-Path $outputRoot 'current-stable'
+    New-Item -ItemType Directory -Force -Path $currentStableOutput | Out-Null
+    $currentStableBuild = (& dotnet build $currentStableProject -c Release --no-restore --no-incremental --nologo `
+        '--property:EmitCompilerGeneratedFiles=true' `
+        "--property:CompilerGeneratedFilesOutputPath=$currentStableOutput" 2>&1 | Out-String)
+    if ($LASTEXITCODE -ne 0) {
+        throw "The current stable generator grounding fixture did not build. $currentStableBuild"
+    }
+    $currentStableGeneratedFiles = @(Get-ChildItem -LiteralPath $currentStableOutput -Recurse -Filter '*.g.cs' -File)
+    Assert-That ($currentStableGeneratedFiles.Count -gt 0) 'the current stable LoggerMessage generator must emit inspectable source'
+    $currentStableGenerated = ($currentStableGeneratedFiles | ForEach-Object { Get-Content -Raw -LiteralPath $_.FullName }) -join [Environment]::NewLine
+    Assert-That ($currentStableGenerated.Contains('GeneratedCodeAttribute("Microsoft.Extensions.Logging.Generators", "10.0.14.42308")', [StringComparison]::Ordinal)) 'the current stable fixture must be grounded against generator assembly version 10.0.14.42308'
+    Write-Host 'Generator version matrix passed: 10.0.1/10.0.13.7005 and 10.0.12/10.0.14.42308.'
 
     $absentStart = $generated.IndexOf('AbsentState', [StringComparison]::Ordinal)
     $absentEnd = $generated.IndexOf('MethodOrder', [StringComparison]::Ordinal)

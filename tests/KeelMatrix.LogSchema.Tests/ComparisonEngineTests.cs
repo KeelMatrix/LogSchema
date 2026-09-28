@@ -101,6 +101,84 @@ public sealed class ComparisonEngineTests
     }
 
     [Fact]
+    public void RenameAndReorderReportsIndependentBreakingDimensions()
+    {
+        var report = Compare(
+            Manifest(Event("Old", 1, "Old", "Information", "old {A} {B}", "A", "B")),
+            Manifest(Event("Old", 1, "Old", "Information", "new {C} {A}", "C", "A")),
+            SeverityGate.Breaking);
+
+        Assert.Contains(report.Findings, finding => finding.Code == "KMLOG102");
+        Assert.Contains(report.Findings, finding => finding.Code == "KMLOG103");
+    }
+
+    [Fact]
+    public void RemovalAndReorderReportsIndependentBreakingDimensions()
+    {
+        var report = Compare(
+            Manifest(Event("Old", 1, "Old", "Information", "old {A} {B} {C}", "A", "B", "C")),
+            Manifest(Event("Old", 1, "Old", "Information", "new {C} {A}", "C", "A")),
+            SeverityGate.Breaking);
+
+        Assert.Contains(report.Findings, finding => finding.Code == "KMLOG101");
+        Assert.Contains(report.Findings, finding => finding.Code == "KMLOG103");
+    }
+
+    [Fact]
+    public void AdditionAndReorderReportsIndependentBreakingDimensions()
+    {
+        var report = Compare(
+            Manifest(Event("Old", 1, "Old", "Information", "old {A} {B}", "A", "B")),
+            Manifest(Event("Old", 1, "Old", "Information", "new {B} {A} {C}", "B", "A", "C")),
+            SeverityGate.Breaking);
+
+        Assert.Contains(report.Findings, finding => finding.Code == "KMLOG104");
+        Assert.Contains(report.Findings, finding => finding.Code == "KMLOG103");
+    }
+
+    [Fact]
+    public void CaseOnlyRenameAndReorderReportsIndependentBreakingDimensions()
+    {
+        var report = Compare(
+            Manifest(Event("Old", 1, "Old", "Information", "old {A} {B}", "A", "B")),
+            Manifest(Event("Old", 1, "Old", "Information", "new {b} {A}", "b", "A")),
+            SeverityGate.Breaking);
+
+        Assert.Contains(report.Findings, finding => finding.Code == "KMLOG102");
+        Assert.Contains(report.Findings, finding => finding.Code == "KMLOG103");
+    }
+
+    [Fact]
+    public void MultipleSimultaneousEditsAndReverseComparisonKeepOrderIndependent()
+    {
+        var forward = Compare(
+            Manifest(Event("Old", 1, "Old", "Information", "old {A} {B} {C} {D}", "A", "B", "C", "D")),
+            Manifest(Event("Old", 1, "Old", "Information", "new {D} {E} {A} {F}", "D", "E", "A", "F")),
+            SeverityGate.Breaking);
+        var reverse = Compare(
+            Manifest(Event("Old", 1, "Old", "Information", "old {D} {E} {A} {F}", "D", "E", "A", "F")),
+            Manifest(Event("Old", 1, "Old", "Information", "new {A} {B} {C} {D}", "A", "B", "C", "D")),
+            SeverityGate.Breaking);
+
+        Assert.Contains(forward.Findings, finding => finding.Code == "KMLOG103");
+        Assert.Contains(reverse.Findings, finding => finding.Code == "KMLOG103");
+    }
+
+    [Fact]
+    public void AcceptingRenameDoesNotSuppressUnacceptedOrderChange()
+    {
+        var report = ComparisonEngine.Compare(
+            Manifest(Event("Old", 1, "Old", "Information", "old {A} {B}", "A", "B")),
+            Manifest(Event("Old", 1, "Old", "Information", "new {C} {A}", "C", "A")),
+            SeverityGate.Breaking,
+            new HashSet<string>(["KMLOG102"]));
+
+        Assert.Contains(report.Findings, finding => finding.Code == "KMLOG102" && finding.Accepted);
+        Assert.Contains(report.Findings, finding => finding.Code == "KMLOG103" && !finding.Accepted);
+        Assert.True(report.HasGatedFindings(SeverityGate.Breaking));
+    }
+
+    [Fact]
     public void BaselineAnalysisErrorsAreRejected()
     {
         var oldManifest = Manifest(Event("Old", 1, "Old", "Information", "old {Value}", "Value")) with

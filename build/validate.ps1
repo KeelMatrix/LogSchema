@@ -6,6 +6,7 @@ $ErrorActionPreference = 'Stop'
 
 $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 . (Join-Path $PSScriptRoot 'Invoke-NestedPwsh.ps1')
+. (Join-Path $PSScriptRoot 'ShippingManifest.ps1')
 $artifactRoot = Join-Path $repositoryRoot 'artifacts/validation'
 $packageOutput = Join-Path $artifactRoot 'package'
 $repeatPackageOutput = Join-Path $artifactRoot 'package-repeat'
@@ -13,6 +14,7 @@ $smokeRoot = Join-Path $artifactRoot 'consumer-smoke'
 $toolProject = Join-Path $repositoryRoot 'src/KeelMatrix.LogSchema/KeelMatrix.LogSchema.csproj'
 $coreProject = Join-Path $repositoryRoot 'src/KeelMatrix.LogSchema.Core/KeelMatrix.LogSchema.Core.csproj'
 $consumerFixture = Join-Path $repositoryRoot 'tests/PackageConsumerFixture'
+$shippingManifest = Join-Path $repositoryRoot 'build/shipping-manifest.json'
 $nugetConfig = Join-Path $repositoryRoot 'NuGet.config'
 $vulnerabilityReportValidator = Join-Path $repositoryRoot 'build/Test-VulnerabilityReport.ps1'
 $msbuildVersionArgument = @()
@@ -288,6 +290,8 @@ foreach ($fixture in @(
         'fixtures/Phase0.Multi/Phase0.Multi.csproj',
         'fixtures/Phase0.Pairing/Phase0.Pairing.csproj',
         'fixtures/Phase0.Sentinel/Phase0.Sentinel.csproj',
+        'fixtures/Phase0.CurrentStable/Phase0.CurrentStable.csproj',
+        'fixtures/Phase0.Rejected/Phase0.Rejected.csproj',
         'fixtures/Phase0.GeneratedDeclarationGenerator/Phase0.GeneratedDeclarationGenerator.csproj')) {
     Invoke-Timed "Restore $fixture" { dotnet restore (Join-Path $repositoryRoot $fixture) --configfile $nugetConfig --nologo }
 }
@@ -300,6 +304,7 @@ Invoke-Timed 'Nested PowerShell launch guard' { Invoke-NestedPwsh -ArgumentList 
 Invoke-Timed 'Vulnerability audit regression tests' { Invoke-NestedPwsh -ArgumentList @('-NoProfile', '-NonInteractive', '-File', (Join-Path $repositoryRoot 'build/Test-VulnerabilityReport.Tests.ps1')) }
 Invoke-Timed 'Release contract regression tests' { Invoke-NestedPwsh -ArgumentList @('-NoProfile', '-NonInteractive', '-File', (Join-Path $repositoryRoot 'build/Test-ReleaseVersion.Tests.ps1')) }
 Invoke-Timed 'Release workflow contract' { Invoke-NestedPwsh -ArgumentList @('-NoProfile', '-NonInteractive', '-File', (Join-Path $repositoryRoot 'build/Test-ReleaseWorkflow.ps1')) }
+Invoke-Timed 'Shipping manifest negative controls' { Invoke-NestedPwsh -ArgumentList @('-NoProfile', '-NonInteractive', '-File', (Join-Path $repositoryRoot 'build/Test-ShippingManifest.ps1'), '-RepositoryRoot', $repositoryRoot) }
 Invoke-Timed 'Pack-safety regression tests' { Invoke-NestedPwsh -ArgumentList @('-NoProfile', '-NonInteractive', '-File', (Join-Path $repositoryRoot 'build/Test-PackSafety.ps1')) }
 Invoke-Timed 'Documentation and repository consistency' { Invoke-NestedPwsh -ArgumentList @('-NoProfile', '-NonInteractive', '-File', (Join-Path $repositoryRoot 'build/Test-Documentation.ps1')) }
 Invoke-Timed 'Line-ending contract' {
@@ -445,31 +450,12 @@ Invoke-Timed 'Pack and inspect' {
     $symbolEntryNames = Get-ZipEntryNames -ArchivePath $symbolsPath
     $publishDirectory = Join-Path $repositoryRoot 'src/KeelMatrix.LogSchema/bin/Release/net8.0/publish'
     Assert-That (Test-Path -LiteralPath $publishDirectory -PathType Container) "publish output was not found: $publishDirectory"
-    $publishedToolEntries = @(Get-ChildItem -LiteralPath $publishDirectory -File -Recurse | ForEach-Object {
-            $relativePath = [IO.Path]::GetRelativePath($publishDirectory, $_.FullName).Replace('\', '/')
-            if ($relativePath -notin @($assemblyName, "$assemblyName.exe")) {
-                "tools/net8.0/any/$relativePath"
-            }
-        } | Where-Object { $null -ne $_ })
-    $expectedPackageEntries = @(
-        '_rels/.rels',
-        '[Content_Types].xml',
-        "$packageId.nuspec",
-        'package/services/metadata/core-properties/nuget.psmdcp',
-        'README.md',
-        'icon.png',
-        'tools/net8.0/any/DotnetToolSettings.xml'
-    ) + $publishedToolEntries
-    $expectedSymbolEntries = @(
-        '_rels/.rels',
-        '[Content_Types].xml',
-        "$packageId.nuspec",
-        'package/services/metadata/core-properties/nuget.psmdcp',
-        'tools/net8.0/any/KeelMatrix.LogSchema.pdb',
-        'tools/net8.0/any/KeelMatrix.LogSchema.Core.pdb'
-    )
-    Assert-ExactSet -Label $expectedPackageName -Actual $entryNames -Expected $expectedPackageEntries
-    Assert-ExactSet -Label $expectedSymbolsName -Actual $symbolEntryNames -Expected $expectedSymbolEntries
+    Assert-ShippingManifest -ManifestPath $shippingManifest `
+        -CoreAssetsPath (Join-Path (Split-Path -Parent $coreProject) 'obj/project.assets.json') `
+        -ToolAssetsPath (Join-Path (Split-Path -Parent $toolProject) 'obj/project.assets.json') `
+        -PublishDirectory $publishDirectory `
+        -PackagePath $packagePath `
+        -SymbolsPath $symbolsPath
 
     $nuspecEntry = @($entryNames | Where-Object { $_ -match '\.nuspec$' })
     Assert-That ($nuspecEntry.Count -eq 1) 'the package must contain exactly one nuspec'

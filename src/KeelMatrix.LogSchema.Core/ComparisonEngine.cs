@@ -122,11 +122,10 @@ internal static class ComparisonEngine
 
         var oldNames = oldEvent.StructuredState.Select(property => property.EmittedName).ToArray();
         var newNames = newEvent.StructuredState.Select(property => property.EmittedName).ToArray();
-        var retainedOldNames = RetainedOccurrences(oldNames, newNames);
-        var retainedNewNames = RetainedOccurrences(newNames, oldNames);
-        if (!retainedOldNames.SequenceEqual(retainedNewNames, StringComparer.Ordinal))
+        var orderComparison = CompareIndependentOrder(oldNames, newNames);
+        if (!orderComparison.Old.SequenceEqual(orderComparison.New, StringComparer.Ordinal))
         {
-            findings.Add(Find("KMLOG103", FindingSeverity.Breaking, newEvent, "structuredState", string.Join(", ", retainedOldNames), string.Join(", ", retainedNewNames), $"{Display(newEvent)} changed structured-state property order."));
+            findings.Add(Find("KMLOG103", FindingSeverity.Breaking, newEvent, "structuredState", string.Join(", ", orderComparison.Old), string.Join(", ", orderComparison.New), $"{Display(newEvent)} changed structured-state property order."));
         }
 
         var removed = DifferenceByOccurrence(oldNames, newNames);
@@ -195,5 +194,61 @@ internal static class ComparisonEngine
         }
 
         return difference;
+    }
+
+    private static (IReadOnlyList<string> Old, IReadOnlyList<string> New) CompareIndependentOrder(string[] oldNames, string[] newNames)
+    {
+        var removed = DifferenceByOccurrence(oldNames, newNames);
+        var added = DifferenceByOccurrence(newNames, oldNames);
+        var renameCount = Math.Min(removed.Count, added.Count);
+        var renameTargets = new Dictionary<string, Queue<string>>(StringComparer.Ordinal);
+        for (var index = 0; index < renameCount; index++)
+        {
+            if (!renameTargets.TryGetValue(removed[index], out var targets))
+            {
+                targets = new Queue<string>();
+                renameTargets.Add(removed[index], targets);
+            }
+            targets.Enqueue(added[index]);
+        }
+
+        var mappedOld = new List<string>(oldNames.Length);
+        var remainingRemoved = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var name in removed.Skip(renameCount))
+        {
+            remainingRemoved[name] = remainingRemoved.GetValueOrDefault(name) + 1;
+        }
+
+        foreach (var name in oldNames)
+        {
+            if (remainingRemoved.TryGetValue(name, out var removalCount) && removalCount > 0)
+            {
+                remainingRemoved[name] = removalCount - 1;
+                continue;
+            }
+
+            if (renameTargets.TryGetValue(name, out var targets) && targets.Count > 0)
+            {
+                mappedOld.Add(targets.Dequeue());
+            }
+            else
+            {
+                mappedOld.Add(name);
+            }
+        }
+
+        var expectedNames = mappedOld.GroupBy(name => name, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal);
+        var comparableNew = new List<string>(mappedOld.Count);
+        foreach (var name in newNames)
+        {
+            if (expectedNames.TryGetValue(name, out var count) && count > 0)
+            {
+                comparableNew.Add(name);
+                expectedNames[name] = count - 1;
+            }
+        }
+
+        return (mappedOld, comparableNew);
     }
 }

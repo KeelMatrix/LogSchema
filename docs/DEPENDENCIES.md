@@ -2,7 +2,7 @@
 
 This document explains the dependency boundary for the v1 `KeelMatrix.LogSchema` tool. The NuGet tool package bundles the shipping CLI, Core assembly, and required runtime files under `tools/net8.0/any`; its generated nuspec intentionally exposes no external package dependencies. The Release package gate checks that archive shape and separately reports the complete restored Core graph; the commands below reproduce the graph evidence.
 
-The shipping tool has one runtime dependency graph for semantic project loading and canonical comparison:
+The shipping tool has one runtime dependency graph for semantic project loading and canonical comparison. Repository-owned shipping intent is recorded in `build/shipping-manifest.json`; `build/validate.ps1` independently checks the resolved Core and CLI graphs, publish directory, `.nupkg`, and `.snupkg` against that manifest. The expected set is not inferred from the files emitted by the build, so extra direct, transitive, content, runtime, or version-shifted assets fail the gate. The manifest explicitly normalizes the Windows `.exe` apphost to the equivalent Unix apphost name; both variants remain one required publish entry, and duplicate or unrelated variants fail closed.
 
 - `Microsoft.CodeAnalysis.CSharp.Workspaces` and `Microsoft.CodeAnalysis.Workspaces.MSBuild` provide semantic C# documents and design-time SDK project loading. They are required to discover `LoggerMessageAttribute` declarations without executing target assemblies.
 - `Microsoft.Build.Locator` selects the installed MSBuild instance used by the workspace. It is a project-loading dependency, not a runtime logging provider.

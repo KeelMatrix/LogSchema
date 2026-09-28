@@ -5,6 +5,44 @@ namespace KeelMatrix.LogSchema.Tests;
 
 public sealed class ExtractorTests
 {
+    [Theory]
+    [InlineData("escaped {{literal}}", true, "")]
+    [InlineData("odd {{{Value}}}", true, "Value")]
+    [InlineData("even {{{{Value}}}}", true, "")]
+    [InlineData("spaces { Value ,10:000 }", true, "Value")]
+    [InlineData("at {@Value}", true, "@Value")]
+    [InlineData("casing {CustomerID}", true, "CustomerID")]
+    [InlineData("unicode {Идентификатор}", true, "Идентификатор")]
+    [InlineData("stray closing }", false, "")]
+    [InlineData("unmatched opening {Value", false, "")]
+    [InlineData("wrong brace {Value } tail }", false, "")]
+    public void TemplateParserMatchesGeneratorBraceAndNameSemantics(string message, bool expectedSuccess, string expectedName)
+    {
+        var success = LogSchemaExtractor.TryReadPlaceholders(message, out var placeholders, out _);
+
+        Assert.Equal(expectedSuccess, success);
+        if (expectedSuccess)
+        {
+            Assert.Equal(expectedName.Length == 0 ? 0 : 1, placeholders.Count);
+            if (expectedName.Length > 0)
+            {
+                Assert.Equal(expectedName, placeholders[0].Name);
+            }
+        }
+    }
+
+    [Fact]
+    public void TemplateParserPreservesFormatTokenAndRejectsEmptyNames()
+    {
+        Assert.True(LogSchemaExtractor.TryReadPlaceholders("{Value,10:000}", out var placeholders, out var reason), reason);
+        var placeholder = Assert.Single(placeholders);
+        Assert.Equal("Value", placeholder.Name);
+        Assert.Equal("Value,10:000", placeholder.Token);
+
+        Assert.False(LogSchemaExtractor.TryReadPlaceholders("{} { }", out _, out reason));
+        Assert.Contains("empty placeholder", reason, StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task ShippingExtractorCapturesGeneratorEffectiveDefaultsAndDynamicLevel()
     {

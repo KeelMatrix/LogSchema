@@ -33,8 +33,9 @@ internal sealed record LoggerMessageMethodSemantics(
 internal static class LoggerMessageGeneratorSemantics
 {
     internal const string GeneratorAssemblyName = "Microsoft.Extensions.Logging.Generators";
-    internal const string SupportedAbstractionsPackageRange = "[10.0.1]";
+    internal const string SupportedAbstractionsPackageRange = "10.0.1 and 10.0.12";
     internal const string SupportedGeneratorAssemblyVersion = "10.0.13.7005";
+    internal const string CurrentStableGeneratorAssemblyVersion = "10.0.14.42308";
     internal const string GeneratorVersionIssueCode = "KMLOGP009";
 
     private const string LoggerMetadataName = "Microsoft.Extensions.Logging.ILogger";
@@ -224,12 +225,12 @@ internal static class LoggerMessageGeneratorSemantics
     }
 
     internal static bool IsSupportedGeneratorVersion(IReadOnlySet<string> versions) =>
-        versions.Count == 1 && versions.Contains(SupportedGeneratorAssemblyVersion);
+        versions.Count == 1 && (versions.Contains(SupportedGeneratorAssemblyVersion) || versions.Contains(CurrentStableGeneratorAssemblyVersion));
 
     internal static string GeneratorVersionFailureMessage(IReadOnlySet<string> versions) =>
         versions.Count == 0
-            ? $"The Microsoft.Extensions.Logging.Generators assembly version could not be detected; verified support is limited to Microsoft.Extensions.Logging.Abstractions {SupportedAbstractionsPackageRange} with generator assembly {SupportedGeneratorAssemblyVersion}."
-            : $"The project uses Microsoft.Extensions.Logging.Generators version(s) '{string.Join(", ", versions.Order(StringComparer.Ordinal))}'; verified support is limited to Microsoft.Extensions.Logging.Abstractions {SupportedAbstractionsPackageRange} with generator assembly {SupportedGeneratorAssemblyVersion}.";
+            ? $"The Microsoft.Extensions.Logging.Generators assembly version could not be detected; verified support is limited to Microsoft.Extensions.Logging.Abstractions {SupportedAbstractionsPackageRange} with generator assemblies {SupportedGeneratorAssemblyVersion} (10.0.1) and {CurrentStableGeneratorAssemblyVersion} (10.0.12)."
+            : $"The project uses Microsoft.Extensions.Logging.Generators version(s) '{string.Join(", ", versions.Order(StringComparer.Ordinal))}'; verified support is limited to Microsoft.Extensions.Logging.Abstractions {SupportedAbstractionsPackageRange} with generator assemblies {SupportedGeneratorAssemblyVersion} (10.0.1) and {CurrentStableGeneratorAssemblyVersion} (10.0.12).";
 
     internal static string FormatRole(GeneratorParameterRoles roles)
     {

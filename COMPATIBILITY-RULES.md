@@ -20,6 +20,8 @@ Structured identity fields use exact ordinal semantics: comparisons are case-sen
 
 `--severity breaking` gates only BREAKING findings. `--severity warning` gates BREAKING and WARNING findings. `--severity all` gates every finding, including INFO. Findings remain structured and stable in text and JSON output. `--accept <code>` explicitly accepts matching findings for the current comparison and never rewrites a baseline.
 
+Structured-state order is an independent change dimension. `KMLOG103` is computed from the comparable old and new state sequences after rename pairing, rather than from only the names retained unchanged. Therefore a rename, removal, or addition that also reorders state can produce both its own finding and `KMLOG103`; accepting one code never accepts or suppresses the other.
+
 ## Analysis diagnostics
 
 Analysis diagnostics make an extracted or compared contract untrustworthy. An error returns exit code 3. Warnings remain in a captured manifest for review; comparison rejects any manifest with unsupported declarations through `KMLOGP007`.
@@ -36,6 +38,7 @@ Manifest read validation runs before comparison. Each canonical identity paramet
 | KMLOGP006 | No supported `[LoggerMessage]` declarations were found. | `capture` and `check` return exit 3; `capture` writes no baseline and `check` rejects a zero-event baseline. |
 | KMLOGP007 | The manifest contains unsupported declarations. | `check` and `diff` return exit 3 and report the unsupported declaration identities and reasons; the supported subset is not presented as complete coverage. |
 | KMLOGP008 | A source document has no safe stable logical identity, or distinct syntax trees resolve to one logical source provenance identity. | Error; capture/check return exit 3 and no baseline is written because source diagnostics could identify the wrong document. |
+| KMLOGP009 | The loaded generated source does not identify exactly one verified Microsoft logging-generator assembly version. | Error; capture/check return exit 3 because generator semantics are not within the verified support boundary. |
 
 Resource ceilings are part of the same analysis-error family even though they do not need a separate compatibility code. The shared budget covers project/document counts, source bytes, compilation/generated syntax trees and text, and discovered/supported/unsupported declaration counts. A `.sln`/`.slnx` project-count preflight runs before the full solution-open path where possible; an exceeded ceiling returns exit 3 with `Project analysis resource limit exceeded`, no stack trace, no machine path, and no baseline. MSBuild evaluation remains a local trust boundary and is not claimed to be sandboxed or absolutely bounded.
 

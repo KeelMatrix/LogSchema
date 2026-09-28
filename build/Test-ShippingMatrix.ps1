@@ -177,6 +177,21 @@ Assert-OrdinaryFixture -Name 'multi-net10' -Project 'fixtures/Phase0.Multi/Phase
 Assert-GeneratorStateFixture
 Assert-RootIndependentManifest
 
+$currentStableOutput = Join-Path $outputRoot 'current-stable.json'
+$currentStable = Invoke-ShippingTool -Arguments @('capture', (Join-Path $RepositoryRoot 'fixtures/Phase0.CurrentStable/Phase0.CurrentStable.csproj'), '--tfm', 'net10.0', '--output', $currentStableOutput, '--no-telemetry')
+Assert-That ($currentStable.ExitCode -eq 0) "current stable generator capture must return exit 0. $($currentStable.Output)"
+$currentStableManifest = Get-Content -Raw -LiteralPath $currentStableOutput | ConvertFrom-Json
+Assert-That (@($currentStableManifest.events).Count -eq 1 -and @($currentStableManifest.unsupported).Count -eq 0) 'current stable generator line must produce one supported event without unsupported declarations'
+Assert-That (@($currentStableManifest.analysisIssues | Where-Object severity -eq 'error').Count -eq 0) 'current stable generator line must not produce analysis errors'
+Write-Host "Current stable generator manifest: generator=10.0.14.42308 events=$(@($currentStableManifest.events).Count)"
+
+$rejected = Invoke-ShippingTool -Arguments @('capture', (Join-Path $RepositoryRoot 'fixtures/Phase0.Rejected/Phase0.Rejected.csproj'), '--tfm', 'net8.0', '--format', 'json', '--output', (Join-Path $outputRoot 'rejected.json'), '--no-telemetry')
+Assert-That ($rejected.ExitCode -eq 3) "generator-rejected declaration shapes must fail closed with exit 3. $($rejected.Output)"
+$rejectedEnvelope = $rejected.Output | ConvertFrom-Json
+Assert-That (@($rejectedEnvelope.analysisErrors | Where-Object { $_ -match 'KMLOGP006' }).Count -gt 0) 'all generator-rejected declaration shapes must fail closed through the zero-supported-event analysis family'
+Assert-That (@($rejectedEnvelope.unsupported).Count -eq 5 -and @($rejectedEnvelope.unsupported | Where-Object reason -match 'ref kind|params').Count -eq 5) 'out, ref, in, ref readonly, and params declarations must be explicit unsupported records'
+Write-Host "Generator-rejected declaration matrix: unsupported=$(@($rejectedEnvelope.unsupported).Count)"
+
 $pairingOutput = Join-Path $outputRoot 'pairing.json'
 $pairing = Invoke-ShippingTool -Arguments @('capture', (Join-Path $RepositoryRoot 'fixtures/Phase0.Pairing/Phase0.Pairing.csproj'), '--tfm', 'net8.0', '--output', $pairingOutput, '--no-telemetry')
 Assert-That ($pairing.ExitCode -eq 3) 'ambiguous shipping pairing must fail closed with exit 3'

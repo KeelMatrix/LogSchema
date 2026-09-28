@@ -42,6 +42,10 @@ dotnet tool run logschema diff old.json new.json
 
 The log contract is the effective EventId, EventName, level source, message template, template placeholder occurrences, generator-effective parameter roles, and emitted structured-state properties of a supported partial void method using `LoggerMessageAttribute`. A placeholder is one message-template occurrence; structured state is the unique emitted property list in method-parameter order. An omitted EventId follows the pinned generator's deterministic default, an omitted EventName follows the method name, and a level supplied by the first applicable `LogLevel` parameter is recorded as `Dynamic` rather than `None`; `levelParameter` still identifies that candidate for a fixed source. Source diagnostics use deterministic logical provenance (`project/`, `external/up-N/`, or `generated/` identities), preserve dot-prefixed names, and fail closed on unsafe or colliding identities. V1 reads C# projects through design-time MSBuild/Roslyn, does not execute target code, and reports unsupported declarations explicitly.
 
+### Generator compatibility
+
+The supported generator boundary is defined by the exact verified pairs `Microsoft.Extensions.Logging.Abstractions` 10.0.1 / `Microsoft.Extensions.Logging.Generators` 10.0.13.7005 and `Microsoft.Extensions.Logging.Abstractions` 10.0.12 / `Microsoft.Extensions.Logging.Generators` 10.0.14.42308. Mixed, unknown, or undetectable versions fail closed. A captured event also requires exactly one matching generated implementation; generator-rejected, missing, duplicate, and unmatchable declarations are reported as unsupported.
+
 ## Compatibility summary
 
 The complete matrix is in the linked [compatibility rules](https://github.com/KeelMatrix/LogSchema/blob/main/COMPATIBILITY-RULES.md). The v1 default `breaking` gate treats these changes as follows:
