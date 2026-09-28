@@ -429,7 +429,8 @@ Invoke-Timed 'Zero-event analysis safety' {
   "unsupported": [],
   "analysisIssues": [],
   "compilationDiagnosticKinds": [],
-  "workspaceDiagnosticKinds": []
+  "workspaceDiagnosticKinds": [],
+  "integrity": "4B044D11D8078DAE6E83B75D49A85F77F716560661AF17FF60CA235120D073E2"
 }
 "@ | Set-Content -LiteralPath $zeroBaseline -Encoding utf8NoBOM
     $baselineOutput = (& dotnet $tool check $fixtureProject --tfm net8.0 --baseline $zeroBaseline --no-telemetry 2>&1 | Out-String)
