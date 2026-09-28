@@ -421,18 +421,18 @@ Invoke-Timed 'Zero-event analysis safety' {
     Assert-That ($zeroOutput -match 'KMLOGP006') 'zero-event capture must report KMLOGP006'
     Assert-That (-not (Test-Path -LiteralPath $zeroBaseline)) 'zero-event capture must not write a baseline'
 
-    @"
-{
-  "schemaVersion": 1,
-  "projects": [],
-  "events": [],
-  "unsupported": [],
-  "analysisIssues": [],
-  "compilationDiagnosticKinds": [],
-  "workspaceDiagnosticKinds": [],
-  "integrity": "4B044D11D8078DAE6E83B75D49A85F77F716560661AF17FF60CA235120D073E2"
-}
-"@ | Set-Content -LiteralPath $zeroBaseline -Encoding utf8NoBOM
+    $zeroManifest = [System.Text.Json.Nodes.JsonObject]::new()
+    $zeroManifest['schemaVersion'] = 1
+    foreach ($name in @('projects', 'events', 'unsupported', 'analysisIssues', 'compilationDiagnosticKinds', 'workspaceDiagnosticKinds')) {
+        $zeroManifest[$name] = [System.Text.Json.Nodes.JsonArray]::new()
+    }
+    $zeroJsonOptions = [System.Text.Json.JsonSerializerOptions]::new()
+    $zeroJsonOptions.WriteIndented = $true
+    $zeroJsonOptions.Encoder = [System.Text.Encodings.Web.JavaScriptEncoder]::UnsafeRelaxedJsonEscaping
+    $zeroJsonOptions.MaxDepth = 32
+    $zeroIntegrity = [Convert]::ToHexString([System.Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($zeroManifest.ToJsonString($zeroJsonOptions))))
+    $zeroManifest['integrity'] = $zeroIntegrity
+    ($zeroManifest.ToJsonString($zeroJsonOptions) + [Environment]::NewLine) | Set-Content -LiteralPath $zeroBaseline -Encoding utf8NoBOM
     $baselineOutput = (& dotnet $tool check $fixtureProject --tfm net8.0 --baseline $zeroBaseline --no-telemetry 2>&1 | Out-String)
     Assert-That ($LASTEXITCODE -eq 3) 'zero-event baseline check must return exit 3'
     Assert-That ($baselineOutput -match 'KMLOGP006') 'zero-event baseline check must report KMLOGP006'
