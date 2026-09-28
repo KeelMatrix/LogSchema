@@ -335,7 +335,7 @@ internal static class ManifestJson
     {
         if (manifest.Integrity is null)
         {
-            return;
+            throw new ManifestValidationException("The manifest integrity value is required; unsigned legacy v1 manifests cannot be compared.");
         }
 
         if (manifest.Integrity.Length != 64 || !manifest.Integrity.All(Uri.IsHexDigit) ||
@@ -352,15 +352,27 @@ internal static class ManifestJson
             throw new ManifestValidationException("The manifest root must be an object.");
         }
 
+        RejectUnknownProperties(root, "root", "schemaVersion", "projects", "events", "unsupported", "analysisIssues", "compilationDiagnosticKinds", "workspaceDiagnosticKinds", "integrity");
+
         _ = RequiredInteger(root, "schemaVersion");
         foreach (var name in new[] { "projects", "events", "unsupported", "analysisIssues", "compilationDiagnosticKinds", "workspaceDiagnosticKinds" })
         {
             _ = RequiredArray(root, name);
         }
+        if (!root.TryGetProperty("integrity", out var integrity))
+        {
+            throw new ManifestValidationException("The manifest integrity value is required; unsigned legacy v1 manifests cannot be compared.");
+        }
+
+        if (integrity.ValueKind != JsonValueKind.String)
+        {
+            throw new ManifestValidationException("The manifest field 'integrity' must be a string.");
+        }
 
         foreach (var project in RequiredArray(root, "projects").EnumerateArray())
         {
             RequireObject(project, "projects");
+            RejectUnknownProperties(project, "project", "key", "name", "assembly", "targetFramework");
             RequireString(project, "key");
             RequireString(project, "name");
             RequireString(project, "assembly");
@@ -370,6 +382,7 @@ internal static class ManifestJson
         foreach (var @event in RequiredArray(root, "events").EnumerateArray())
         {
             RequireObject(@event, "events");
+            RejectUnknownProperties(@event, "event", "projectKey", "identity", "containingType", "method", "genericArity", "parameterRefKinds", "eventId", "eventName", "level", "message", "placeholders", "parameterForms", "source", "parameters", "structuredState", "loggerParameter", "exceptionParameter", "levelSource", "levelParameter");
             RequireString(@event, "projectKey");
             RequireString(@event, "identity");
             RequireString(@event, "containingType");
@@ -383,6 +396,7 @@ internal static class ManifestJson
             foreach (var placeholder in RequiredArray(@event, "placeholders").EnumerateArray())
             {
                 RequireObject(placeholder, "placeholders");
+                RejectUnknownProperties(placeholder, "placeholder", "name", "token");
                 RequireString(placeholder, "name");
                 RequireString(placeholder, "token");
             }
@@ -390,6 +404,7 @@ internal static class ManifestJson
             foreach (var parameter in RequiredArray(@event, "parameters").EnumerateArray())
             {
                 RequireObject(parameter, "parameters");
+                RejectUnknownProperties(parameter, "parameter", "name", "type", "refKind", "role");
                 RequireString(parameter, "name");
                 RequireString(parameter, "type");
                 RequireString(parameter, "refKind");
@@ -398,6 +413,7 @@ internal static class ManifestJson
             foreach (var property in RequiredArray(@event, "structuredState").EnumerateArray())
             {
                 RequireObject(property, "structuredState");
+                RejectUnknownProperties(property, "structuredState", "parameterName", "emittedName");
                 RequireString(property, "parameterName");
                 RequireString(property, "emittedName");
             }
@@ -411,6 +427,7 @@ internal static class ManifestJson
         foreach (var item in RequiredArray(root, "unsupported").EnumerateArray())
         {
             RequireObject(item, "unsupported");
+            RejectUnknownProperties(item, "unsupported", "projectKey", "source", "declaration", "declarationKey", "reason");
             RequireString(item, "projectKey");
             ValidateJsonSource(item, "source");
             RequireString(item, "declaration");
@@ -421,6 +438,7 @@ internal static class ManifestJson
         foreach (var issue in RequiredArray(root, "analysisIssues").EnumerateArray())
         {
             RequireObject(issue, "analysisIssues");
+            RejectUnknownProperties(issue, "analysis issue", "projectKey", "code", "severity", "message", "declarationKey", "sources");
             RequireString(issue, "projectKey");
             RequireString(issue, "code");
             RequireString(issue, "severity");
@@ -432,6 +450,7 @@ internal static class ManifestJson
                 {
                     throw new ManifestValidationException("A manifest source record must be an object.");
                 }
+                RejectUnknownProperties(source, "source", "file", "line", "kind");
                 RequireString(source, "file");
                 _ = RequiredInteger(source, "line");
                 RequireString(source, "kind");
@@ -440,9 +459,17 @@ internal static class ManifestJson
 
         RequireStringArray(root, "compilationDiagnosticKinds");
         RequireStringArray(root, "workspaceDiagnosticKinds");
-        if (root.TryGetProperty("integrity", out var integrity) && integrity.ValueKind != JsonValueKind.String)
+    }
+
+    private static void RejectUnknownProperties(JsonElement value, string context, params string[] knownNames)
+    {
+        var known = knownNames.ToHashSet(StringComparer.Ordinal);
+        foreach (var property in value.EnumerateObject())
         {
-            throw new ManifestValidationException("The manifest field 'integrity' must be a string when present.");
+            if (!known.Contains(property.Name))
+            {
+                throw new ManifestValidationException($"The manifest contains unknown field '{property.Name}' in {context}.");
+            }
         }
     }
 
@@ -935,6 +962,7 @@ internal static class ManifestJson
         {
             throw new ManifestValidationException($"The manifest field '{name}' is required and must be an object.");
         }
+        RejectUnknownProperties(source, "source", "file", "line", "kind");
         RequireString(source, "file");
         _ = RequiredInteger(source, "line");
         RequireString(source, "kind");

@@ -593,6 +593,23 @@ public sealed class ManifestJsonTests
         """)!;
         var expectedForms = new[] { "ILogger", "LogLevel", "Exception", "None", "None", "None" };
         var allForms = new[] { "None", "Exception", "ILogger", "LogLevel" };
+        var integrityOptions = new JsonSerializerOptions
+        {
+            WriteIndented = true,
+            DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
+            Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+            MaxDepth = 32
+        };
+
+        JsonNode Sign(JsonNode candidate)
+        {
+            candidate.AsObject().Remove("integrity");
+            var model = JsonSerializer.Deserialize<ManifestDocument>(candidate.ToJsonString())!;
+            var unsignedJson = JsonSerializer.Serialize(model.Canonicalize() with { Integrity = null }, integrityOptions);
+            var digest = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(unsignedJson)));
+            candidate.AsObject()["integrity"] = digest;
+            return candidate;
+        }
 
         try
         {
@@ -602,6 +619,7 @@ public sealed class ManifestJsonTests
                 {
                     var candidateManifest = JsonNode.Parse(manifest.ToJsonString())!;
                     candidateManifest["events"]![0]!["parameterForms"]![position] = candidate;
+                    candidateManifest = Sign(candidateManifest);
                     var path = Path.Combine(root.FullName, $"position-{position}-{candidate}.json");
                     await File.WriteAllTextAsync(path, candidateManifest.ToJsonString());
 

@@ -103,17 +103,7 @@ public sealed class CommandRunnerTests
         var baselinePath = Path.Combine(Directory.CreateTempSubdirectory("logschema-zero-baseline-").FullName, "empty.json");
         try
         {
-            await File.WriteAllTextAsync(baselinePath, """
-{
-  "schemaVersion": 1,
-  "projects": [],
-  "events": [],
-  "unsupported": [],
-  "analysisIssues": [],
-  "compilationDiagnosticKinds": [],
-  "workspaceDiagnosticKinds": []
-}
-""");
+            await ManifestJson.WriteAsync(ManifestDocument.Empty, baselinePath, CancellationToken.None);
 
             using var checkOutput = new StringWriter();
             using var checkErrors = new StringWriter();

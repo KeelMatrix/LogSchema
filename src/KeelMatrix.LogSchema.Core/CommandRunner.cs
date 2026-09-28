@@ -336,8 +336,11 @@ Compatibility summary:
   exact top-level LogLevel or Exception, else None. Non-canonical text and form contradictions return 3
   with incomplete coverage and no findings. Raw type prefixes and suffixes are never trusted.
   Manifest reads cross-validate fixed/dynamic level fields and recompute the exact placeholder occurrence
-  sequence from message. New captures include a canonical SHA-256 integrity value; any present mismatch
-  returns 3 before comparison with incomplete coverage and no findings.
+  sequence from message. Every comparable v1 manifest requires a canonical SHA-256 integrity value;
+  missing, malformed, or stale values and unknown JSON fields return 3 before comparison with incomplete
+  coverage and no findings. The digest is a self-consistency check, not a signature; a consistently
+  re-signed mutation is not evidence of authenticity or provenance. Regenerate legacy unsigned v1 inputs
+  with capture.
   KMLOGP006 means no supported [LoggerMessage] declarations were found; capture/check return 3 and
   capture does not write a baseline. diff remains a pure manifest comparison.
   Source provenance uses project/, external/up-N/, and generated/ logical identities; unsafe or

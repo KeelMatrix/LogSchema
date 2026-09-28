@@ -86,6 +86,125 @@ function Assert-AnalysisErrorEnvelope {
     Assert-That ($Result.Output -notmatch '(?m)^\s*at KeelMatrix\.') "$Label must not expose a stack trace"
 }
 
+$integrityJsonOptions = [System.Text.Json.JsonSerializerOptions]::new()
+$integrityJsonOptions.WriteIndented = $true
+$integrityJsonOptions.DefaultIgnoreCondition = [System.Text.Json.Serialization.JsonIgnoreCondition]::WhenWritingNull
+$integrityJsonOptions.Encoder = [System.Text.Encodings.Web.JavaScriptEncoder]::UnsafeRelaxedJsonEscaping
+$integrityJsonOptions.MaxDepth = 32
+$persistedJsonOptions = [System.Text.Json.JsonSerializerOptions]::new()
+$persistedJsonOptions.WriteIndented = $true
+$persistedJsonOptions.Encoder = [System.Text.Encodings.Web.JavaScriptEncoder]::UnsafeRelaxedJsonEscaping
+$persistedJsonOptions.MaxDepth = 32
+
+function Remove-NullJsonNodes {
+    param([Parameter(Mandatory = $true)][System.Text.Json.Nodes.JsonNode]$Node)
+
+    if ($Node -is [System.Text.Json.Nodes.JsonObject]) {
+        foreach ($entry in @($Node.AsObject().GetEnumerator())) {
+            if ($null -eq $entry.Value) {
+                [void]$Node.AsObject().Remove($entry.Key)
+            }
+            else {
+                Remove-NullJsonNodes -Node $entry.Value
+            }
+        }
+    }
+    elseif ($Node -is [System.Text.Json.Nodes.JsonArray]) {
+        foreach ($item in @($Node.AsArray())) {
+            if ($null -ne $item) {
+                Remove-NullJsonNodes -Node $item
+            }
+        }
+    }
+}
+
+function Write-RawManifest {
+    param(
+        [Parameter(Mandatory = $true)]$Manifest,
+        [Parameter(Mandatory = $true)][string]$Destination
+    )
+
+    $Manifest | ConvertTo-Json -Depth 50 | Set-Content -LiteralPath $Destination -Encoding utf8NoBOM
+}
+
+function Get-CanonicalManifestPropertyOrder {
+    param([Parameter(Mandatory = $true)][System.Text.Json.Nodes.JsonObject]$Object)
+
+    $names = @($Object.GetEnumerator() | ForEach-Object Key)
+    if ($names -contains 'schemaVersion') { return @('schemaVersion', 'projects', 'events', 'unsupported', 'analysisIssues', 'compilationDiagnosticKinds', 'workspaceDiagnosticKinds', 'integrity') }
+    if ($names -contains 'containingType') { return @('projectKey', 'identity', 'containingType', 'method', 'genericArity', 'parameterRefKinds', 'eventId', 'eventName', 'level', 'message', 'placeholders', 'parameterForms', 'source', 'parameters', 'structuredState', 'loggerParameter', 'exceptionParameter', 'levelSource', 'levelParameter') }
+    if ($names -contains 'assembly') { return @('key', 'name', 'assembly', 'targetFramework') }
+    if ($names -contains 'declaration') { return @('projectKey', 'source', 'declaration', 'declarationKey', 'reason') }
+    if ($names -contains 'code') { return @('projectKey', 'code', 'severity', 'message', 'declarationKey', 'sources') }
+    if ($names -contains 'file') { return @('file', 'line', 'kind') }
+    if ($names -contains 'emittedName') { return @('parameterName', 'emittedName') }
+    if ($names -contains 'token') { return @('name', 'token') }
+    if ($names -contains 'refKind') { return @('name', 'type', 'refKind', 'role') }
+    return $names
+}
+
+function ConvertTo-CanonicalManifestNode {
+    param([AllowNull()][System.Text.Json.Nodes.JsonNode]$Node)
+
+    if ($null -eq $Node) {
+        return $null
+    }
+
+    if ($Node -is [System.Text.Json.Nodes.JsonArray]) {
+        $array = [System.Text.Json.Nodes.JsonArray]::new()
+        foreach ($item in @($Node.AsArray())) {
+            [void]$array.Add((ConvertTo-CanonicalManifestNode -Node $item))
+        }
+        Write-Output -NoEnumerate $array
+        return
+    }
+    if ($Node -is [System.Text.Json.Nodes.JsonObject]) {
+        $source = $Node.AsObject()
+        $ordered = [System.Text.Json.Nodes.JsonObject]::new()
+        $orderedNames = @(Get-CanonicalManifestPropertyOrder -Object $source)
+        foreach ($name in $orderedNames) {
+            if ($source.ContainsKey($name)) {
+                [void]$ordered.Add($name, (ConvertTo-CanonicalManifestNode -Node $source[$name]))
+            }
+        }
+        foreach ($entry in @($source.GetEnumerator() | Where-Object Key -notin $orderedNames)) {
+            [void]$ordered.Add($entry.Key, (ConvertTo-CanonicalManifestNode -Node $entry.Value))
+        }
+        Write-Output -NoEnumerate $ordered
+        return
+    }
+    return $Node.DeepClone()
+}
+
+function Write-SignedManifest {
+    param(
+        [Parameter(Mandatory = $true)]$Manifest,
+        [Parameter(Mandatory = $true)][string]$Destination
+    )
+
+    $node = ConvertTo-CanonicalManifestNode -Node ([System.Text.Json.Nodes.JsonNode]::Parse(($Manifest | ConvertTo-Json -Depth 50 -Compress)))
+    [void]$node.AsObject().Remove('integrity')
+    $unsignedNode = $node.DeepClone()
+    Remove-NullJsonNodes -Node $unsignedNode
+    $unsignedJson = $unsignedNode.ToJsonString($integrityJsonOptions)
+    $digest = [Convert]::ToHexString([System.Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($unsignedJson)))
+    $node.AsObject()['integrity'] = $digest
+    ($node.ToJsonString($persistedJsonOptions) + [Environment]::NewLine) | Set-Content -LiteralPath $Destination -Encoding utf8NoBOM
+}
+
+function Write-ManifestVariant {
+    param(
+        [Parameter(Mandatory = $true)]$Manifest,
+        [Parameter(Mandatory = $true)][ValidateSet('authenticated-stale', 'integrity-absent')][string]$Variant,
+        [Parameter(Mandatory = $true)][string]$Destination
+    )
+
+    if ($Variant -eq 'integrity-absent') {
+        [void]$Manifest.PSObject.Properties.Remove('integrity')
+    }
+    Write-RawManifest -Manifest $Manifest -Destination $Destination
+}
+
 $escapedFeed = [System.Security.SecurityElement]::Escape($feed)
 $config = Join-Path $WorkRoot 'NuGet.config'
 @"
@@ -219,6 +338,7 @@ try {
     function Write-IdentityMutation {
         param(
             [Parameter(Mandatory = $true)][string]$Mutation,
+            [Parameter(Mandatory = $true)][ValidateSet('authenticated-stale', 'integrity-absent')][string]$Variant,
             [Parameter(Mandatory = $true)][string]$Destination
         )
 
@@ -250,8 +370,7 @@ try {
             'additive-form-none' { $targetEvent.parameterForms = @($targetEvent.parameterForms) + 'None' }
             default { throw "Unknown identity mutation: $Mutation" }
         }
-        $tamperedManifest.PSObject.Properties.Remove('integrity')
-        $tamperedManifest | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $Destination -Encoding utf8NoBOM
+        Write-ManifestVariant -Manifest $tamperedManifest -Variant $Variant -Destination $Destination
     }
 
     $identityMutations = @(
@@ -275,13 +394,167 @@ try {
         'additive-form-none'
     )
     foreach ($mutation in $identityMutations) {
-        $tamperedBaseline = Join-Path $freshCheckout "tampered-$mutation.json"
-        Write-IdentityMutation -Mutation $mutation -Destination $tamperedBaseline
-        $tamperedCheck = Invoke-LocalTool -Label "local-manifest $mutation check" -Arguments @('check', $consumerProject, '--baseline', $tamperedBaseline, '--format', 'json', '--severity', 'all', '--no-telemetry')
-        Assert-AnalysisErrorEnvelope -Result $tamperedCheck -Label "installed $mutation check" -ForbiddenPath $freshCheckout
-        $tamperedDiff = Invoke-LocalTool -Label "local-manifest $mutation diff" -Arguments @('diff', $baseline, $tamperedBaseline, '--format', 'json', '--severity', 'all', '--no-telemetry')
-        Assert-AnalysisErrorEnvelope -Result $tamperedDiff -Label "installed $mutation diff" -ForbiddenPath $freshCheckout
+        foreach ($variant in @('authenticated-stale', 'integrity-absent')) {
+            $tamperedBaseline = Join-Path $freshCheckout "tampered-$mutation-$variant.json"
+            Write-IdentityMutation -Mutation $mutation -Variant $variant -Destination $tamperedBaseline
+            $tamperedCheck = Invoke-LocalTool -Label "local-manifest $mutation $variant check" -Arguments @('check', $consumerProject, '--baseline', $tamperedBaseline, '--format', 'json', '--severity', 'all', '--no-telemetry')
+            Assert-AnalysisErrorEnvelope -Result $tamperedCheck -Label "installed $mutation $variant check" -ForbiddenPath $freshCheckout
+            $tamperedDiff = Invoke-LocalTool -Label "local-manifest $mutation $variant diff" -Arguments @('diff', $baseline, $tamperedBaseline, '--format', 'json', '--severity', 'all', '--no-telemetry')
+            Assert-AnalysisErrorEnvelope -Result $tamperedDiff -Label "installed $mutation $variant diff" -ForbiddenPath $freshCheckout
+        }
     }
+
+    function Apply-FieldMutation {
+        param(
+            [Parameter(Mandatory = $true)]$Manifest,
+            [Parameter(Mandatory = $true)][string]$Mutation
+        )
+
+        $targetEvent = @($Manifest.events | Where-Object method -eq 'Event')[0]
+        Assert-That ($null -ne $targetEvent) "the installed capture must contain the canonical Event record for $Mutation"
+        switch ($Mutation) {
+            'schema-version' { $Manifest.schemaVersion = 2 }
+            'project-identity' { $Manifest.projects[0].name = 'MutatedProject' }
+            'source-file' { $targetEvent.source.file = 'project/MutatedLogging.cs' }
+            'source-line' { $targetEvent.source.line = [int]$targetEvent.source.line + 1 }
+            'source-kind' { $targetEvent.source.kind = 'generated' }
+            'event-identity' { $targetEvent.identity = $targetEvent.identity + '.Mutated' }
+            'event-id' { $targetEvent.eventId = [int]$targetEvent.eventId + 1 }
+            'event-name' { $targetEvent.eventName = 'MutatedEvent' }
+            'message' { $targetEvent.message = $targetEvent.message + '!' }
+            'level' { $targetEvent.level = 'Warning' }
+            'level-source' { $targetEvent.levelSource = 'Dynamic' }
+            'level-parameter' { $targetEvent.levelParameter = 'first' }
+            'placeholder-name' { $targetEvent.placeholders[0].name = 'ChangedFirst' }
+            'placeholder-token' { $targetEvent.placeholders[0].token = 'ChangedFirst' }
+            'placeholder-order' { $targetEvent.placeholders = @($targetEvent.placeholders[1], $targetEvent.placeholders[0], $targetEvent.placeholders[2]) }
+            'placeholder-count' { $targetEvent.placeholders = @($targetEvent.placeholders[0], $targetEvent.placeholders[1]) }
+            'parameter-form' { $targetEvent.parameterForms[1] = 'Exception' }
+            'parameter-name' { $targetEvent.parameters[1].name = 'changedFirst' }
+            'parameter-type' { $targetEvent.parameters[1].type = 'int' }
+            'parameter-ref-kind' { $targetEvent.parameters[1].refKind = 'Ref' }
+            'parameter-role' { $targetEvent.parameters[1].role = 'Exception' }
+            'structured-state-name' { $targetEvent.structuredState[0].emittedName = 'ChangedFirst' }
+            'structured-state-order' { $targetEvent.structuredState = @($targetEvent.structuredState[1], $targetEvent.structuredState[0], $targetEvent.structuredState[2]) }
+            'unsupported-record' {
+                $Manifest.unsupported = @([pscustomobject]@{
+                        projectKey = [string]$Manifest.projects[0].key
+                        source = [pscustomobject]@{ file = 'project/Unsupported.cs'; line = 1; kind = 'source' }
+                        declaration = 'unsupported declaration'
+                        declarationKey = 'PackageConsumerFixture.Unsupported'
+                        reason = 'unsupported form'
+                    })
+            }
+            'analysis-issue' {
+                $Manifest.analysisIssues = @([pscustomobject]@{
+                        projectKey = [string]$Manifest.projects[0].key
+                        code = 'KMLOGP001'
+                        severity = 'error'
+                        message = 'Synthetic analysis error.'
+                        declarationKey = ''
+                        sources = @()
+                    })
+            }
+            'compilation-diagnostic-kinds' { $Manifest.compilationDiagnosticKinds = @('CS0001') }
+            'workspace-diagnostic-kinds' { $Manifest.workspaceDiagnosticKinds = @('IDE0001') }
+            'unknown-extra-field' { $Manifest | Add-Member -NotePropertyName futureField -NotePropertyValue 'not part of schema v1' }
+            'required-field-removal' { [void]$targetEvent.PSObject.Properties.Remove('message') }
+            default { throw "Unknown persisted-field mutation: $Mutation" }
+        }
+    }
+
+    $fieldMutations = @(
+        'schema-version',
+        'project-identity',
+        'source-file',
+        'source-line',
+        'source-kind',
+        'event-identity',
+        'event-id',
+        'event-name',
+        'message',
+        'level',
+        'level-source',
+        'level-parameter',
+        'placeholder-name',
+        'placeholder-token',
+        'placeholder-order',
+        'placeholder-count',
+        'parameter-form',
+        'parameter-name',
+        'parameter-type',
+        'parameter-ref-kind',
+        'parameter-role',
+        'structured-state-name',
+        'structured-state-order',
+        'unsupported-record',
+        'analysis-issue',
+        'compilation-diagnostic-kinds',
+        'workspace-diagnostic-kinds',
+        'unknown-extra-field',
+        'required-field-removal'
+    )
+    foreach ($mutation in $fieldMutations) {
+        foreach ($variant in @('authenticated-stale', 'integrity-absent')) {
+            $manifestVariant = Get-Content -Raw -LiteralPath $baseline | ConvertFrom-Json
+            Apply-FieldMutation -Manifest $manifestVariant -Mutation $mutation
+            $fieldBaseline = Join-Path $freshCheckout "field-$mutation-$variant.json"
+            Write-ManifestVariant -Manifest $manifestVariant -Variant $variant -Destination $fieldBaseline
+            $fieldCheck = Invoke-LocalTool -Label "local-manifest field $mutation $variant check" -Arguments @('check', $consumerProject, '--baseline', $fieldBaseline, '--format', 'json', '--severity', 'all', '--no-telemetry')
+            Assert-AnalysisErrorEnvelope -Result $fieldCheck -Label "installed field $mutation $variant check" -ForbiddenPath $freshCheckout
+            $fieldDiff = Invoke-LocalTool -Label "local-manifest field $mutation $variant diff" -Arguments @('diff', $baseline, $fieldBaseline, '--format', 'json', '--severity', 'all', '--no-telemetry')
+            Assert-AnalysisErrorEnvelope -Result $fieldDiff -Label "installed field $mutation $variant diff" -ForbiddenPath $freshCheckout
+        }
+    }
+
+    $integrityCases = @('integrity-absent', 'integrity-malformed', 'integrity-stale')
+    foreach ($integrityCase in $integrityCases) {
+        $integrityManifest = Get-Content -Raw -LiteralPath $baseline | ConvertFrom-Json
+        switch ($integrityCase) {
+            'integrity-absent' { [void]$integrityManifest.PSObject.Properties.Remove('integrity') }
+            'integrity-malformed' { $integrityManifest.integrity = 'not-a-sha256-digest' }
+            'integrity-stale' {
+                $integrityEvent = @($integrityManifest.events | Where-Object method -eq 'Event')[0]
+                $integrityEvent.message = $integrityEvent.message + '!'
+            }
+        }
+        $integrityBaseline = Join-Path $freshCheckout "$integrityCase.json"
+        Write-RawManifest -Manifest $integrityManifest -Destination $integrityBaseline
+        $integrityCheck = Invoke-LocalTool -Label "local-manifest $integrityCase check" -Arguments @('check', $consumerProject, '--baseline', $integrityBaseline, '--format', 'json', '--severity', 'all', '--no-telemetry')
+        Assert-AnalysisErrorEnvelope -Result $integrityCheck -Label "installed $integrityCase check" -ForbiddenPath $freshCheckout
+        if ($integrityCase -eq 'integrity-absent') {
+            Assert-That ($integrityCheck.Output -match 'unsigned legacy v1') 'installed integrity-absent check must explain that unsigned legacy v1 manifests are not comparable'
+        }
+        $integrityDiff = Invoke-LocalTool -Label "local-manifest $integrityCase diff" -Arguments @('diff', $baseline, $integrityBaseline, '--format', 'json', '--severity', 'all', '--no-telemetry')
+        Assert-AnalysisErrorEnvelope -Result $integrityDiff -Label "installed $integrityCase diff" -ForbiddenPath $freshCheckout
+        if ($integrityCase -eq 'integrity-absent') {
+            Assert-That ($integrityDiff.Output -match 'unsigned legacy v1') 'installed integrity-absent diff must explain that unsigned legacy v1 manifests are not comparable'
+        }
+    }
+
+    $resignedManifest = Get-Content -Raw -LiteralPath $baseline | ConvertFrom-Json
+    $resignedEvent = @($resignedManifest.events | Where-Object method -eq 'Event')[0]
+    $resignedEvent.message = $resignedEvent.message + ' (editor revision)'
+    $resignedPath = Join-Path $freshCheckout 'resigned-mutation.json'
+    Write-SignedManifest -Manifest $resignedManifest -Destination $resignedPath
+    $resignedSelfDiff = Invoke-LocalTool -Label 'local-manifest consistently re-signed self-diff' -Arguments @('diff', $resignedPath, $resignedPath, '--format', 'json', '--severity', 'all', '--no-telemetry')
+    Assert-That ($resignedSelfDiff.ExitCode -eq 0) 'a consistently re-signed mutation must remain a valid self-consistent manifest'
+    $resignedSelfEnvelope = $resignedSelfDiff.Output | ConvertFrom-Json
+    Assert-That ($resignedSelfEnvelope.coverageComplete -eq $true -and @($resignedSelfEnvelope.findings).Count -eq 0 -and @($resignedSelfEnvelope.analysisErrors).Count -eq 0) 'a consistently re-signed self-diff must be complete with no findings or analysis errors'
+    $resignedDiff = Invoke-LocalTool -Label 'local-manifest consistently re-signed mutation diff' -Arguments @('diff', $baseline, $resignedPath, '--format', 'json', '--severity', 'all', '--no-telemetry')
+    Assert-That ($resignedDiff.ExitCode -eq 1) 'a consistently re-signed mutation must be compared as content, not rejected as an integrity error'
+    $resignedEnvelope = $resignedDiff.Output | ConvertFrom-Json
+    Assert-That ($resignedEnvelope.coverageComplete -eq $true -and @($resignedEnvelope.findings).Count -gt 0 -and @($resignedEnvelope.analysisErrors).Count -eq 0) 'a consistently re-signed mutation must produce findings with complete coverage'
+    Write-Host 'Re-signed mutation guarantee: the digest accepts self-consistent content; comparison reports the content difference, but the digest does not prove authenticity or provenance.'
+
+    $unknownSignedManifest = Get-Content -Raw -LiteralPath $baseline | ConvertFrom-Json
+    $unknownSignedManifest | Add-Member -NotePropertyName futureField -NotePropertyValue 'not part of schema v1'
+    $unknownSignedPath = Join-Path $freshCheckout 'unknown-extra-field-signed.json'
+    Write-SignedManifest -Manifest $unknownSignedManifest -Destination $unknownSignedPath
+    $unknownSignedCheck = Invoke-LocalTool -Label 'local-manifest unknown extra field re-signed check' -Arguments @('check', $consumerProject, '--baseline', $unknownSignedPath, '--format', 'json', '--severity', 'all', '--no-telemetry')
+    Assert-AnalysisErrorEnvelope -Result $unknownSignedCheck -Label 'installed unknown extra field re-signed check' -ForbiddenPath $freshCheckout
+    $unknownSignedDiff = Invoke-LocalTool -Label 'local-manifest unknown extra field re-signed diff' -Arguments @('diff', $baseline, $unknownSignedPath, '--format', 'json', '--severity', 'all', '--no-telemetry')
+    Assert-AnalysisErrorEnvelope -Result $unknownSignedDiff -Label 'installed unknown extra field re-signed diff' -ForbiddenPath $freshCheckout
 
     $formRows = @(
         [pscustomobject]@{ Type = 'Microsoft.Extensions.Logging.ILogger'; Expected = 'ILogger' },
@@ -341,8 +614,7 @@ try {
         $matrixManifest.analysisIssues = @()
         $matrixManifest.compilationDiagnosticKinds = @()
         $matrixManifest.workspaceDiagnosticKinds = @()
-        $matrixManifest.PSObject.Properties.Remove('integrity')
-        $matrixManifest | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $Destination -Encoding utf8NoBOM
+        Write-SignedManifest -Manifest $matrixManifest -Destination $Destination
     }
 
     for ($position = 0; $position -lt $formRows.Count; $position++) {
@@ -382,9 +654,8 @@ try {
         $targetEvent = @($tamperedManifest.events | Where-Object method -eq 'Event')
         Assert-That ($targetEvent.Count -eq 1) "the installed capture must contain the canonical Event identity for $($mutation.Name)"
         $targetEvent[0].identity = $targetEvent[0].identity.Replace($mutation.Old, $mutation.New, [StringComparison]::Ordinal)
-        $tamperedManifest.PSObject.Properties.Remove('integrity')
         $tamperedBaseline = Join-Path $freshCheckout "tampered-type-$($mutation.Name).json"
-        $tamperedManifest | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $tamperedBaseline -Encoding utf8NoBOM
+        Write-RawManifest -Manifest $tamperedManifest -Destination $tamperedBaseline
         $selfDiff = Invoke-LocalTool -Label "local-manifest $($mutation.Name) self-diff" -Arguments @('diff', $tamperedBaseline, $tamperedBaseline, '--format', 'json', '--severity', 'all', '--no-telemetry')
         Assert-AnalysisErrorEnvelope -Result $selfDiff -Label "installed $($mutation.Name) self-diff" -ForbiddenPath $freshCheckout
     }
@@ -399,8 +670,7 @@ try {
             declarationKey = ''
             sources = @()
         })
-    $comparisonError.PSObject.Properties.Remove('integrity')
-    $comparisonError | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $comparisonErrorManifest -Encoding utf8NoBOM
+    Write-SignedManifest -Manifest $comparisonError -Destination $comparisonErrorManifest
     $comparisonErrorCheck = Invoke-LocalTool -Label 'local-manifest comparison analysis-error check' -Arguments @('check', $consumerProject, '--baseline', $comparisonErrorManifest, '--format', 'json', '--severity', 'all', '--no-telemetry')
     Assert-AnalysisErrorEnvelope -Result $comparisonErrorCheck -Label 'installed comparison analysis-error check' -ForbiddenPath $freshCheckout
     Assert-That ($comparisonErrorCheck.Output -match 'KMLOGP001: Synthetic comparison analysis error') 'installed check must exercise the comparison-originated analysis error'
@@ -408,7 +678,7 @@ try {
     Assert-AnalysisErrorEnvelope -Result $comparisonErrorDiff -Label 'installed comparison analysis-error diff' -ForbiddenPath $freshCheckout
     Assert-That ($comparisonErrorDiff.Output -match 'KMLOGP001: Synthetic comparison analysis error') 'installed diff must exercise the comparison-originated analysis error'
 
-    $reviewerBaseline = Join-Path $freshCheckout 'tampered-reviewer-exact.json'
+    $reviewerBaseline = Join-Path $freshCheckout 'tampered-reviewer-exact-integrity-absent.json'
     $reviewerText = Invoke-LocalTool -Label 'local-manifest reviewer-exact text check' -Arguments @('check', $consumerProject, '--baseline', $reviewerBaseline, '--severity', 'all', '--no-telemetry')
     Assert-That ($reviewerText.ExitCode -eq 3 -and $reviewerText.Output -match '(?m)^ANALYSIS ERROR ') 'the reviewer-exact text check must return an analysis error and exit 3'
     Assert-That (-not $reviewerText.Output.Contains($freshCheckout, [StringComparison]::OrdinalIgnoreCase)) 'the reviewer-exact text check must not expose an absolute path'
@@ -431,8 +701,7 @@ try {
             declarationKey = 'PackageConsumerFixture.Unsupported'
             reason = 'unsupported form'
         })
-    $incompleteManifest.PSObject.Properties.Remove('integrity')
-    $incompleteManifest | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $incompleteBaseline -Encoding utf8NoBOM
+    Write-SignedManifest -Manifest $incompleteManifest -Destination $incompleteBaseline
     $unsupportedCheck = Invoke-LocalTool -Label 'local-manifest unsupported check' -Arguments @('check', $consumerProject, '--baseline', $incompleteBaseline, '--format', 'json', '--no-telemetry')
     Assert-That ($unsupportedCheck.ExitCode -eq 3 -and $unsupportedCheck.Output -match 'KMLOGP007' -and $unsupportedCheck.Output -match 'PackageConsumerFixture\.Unsupported' -and $unsupportedCheck.Output -match 'unsupported form') 'installed check must gate and explain unsupported baseline coverage'
     $unsupportedDiff = Invoke-LocalTool -Label 'local-manifest unsupported diff' -Arguments @('diff', $baseline, $incompleteBaseline, '--format', 'json', '--no-telemetry')

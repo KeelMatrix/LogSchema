@@ -27,6 +27,7 @@ foreach ($readme in @($rootReadme, $packageReadme)) {
     Assert-That ($readme -match '\.NET 8 runtime' -and $readme -match '10\.0\.401') 'consumer runtime and verified project-loading SDK prerequisites must be explicit'
     Assert-That ($readme -match 'parses every declared type with Roslyn' -and $readme -match 'byte-identical to the canonical rendering' -and $readme -match 'wrong-arity' -and $readme -match 'derived exception') 'consumer documentation must describe canonical type authenticity and supported derived exceptions'
     Assert-That ($readme -match 'integrity' -and $readme -match 'placeholder' -and $readme -match 'level') 'consumer documentation must describe persisted manifest integrity and cross-field validation'
+    Assert-That ($readme -match 'missing, malformed, or stale' -and $readme -match 'self-consistency check' -and $readme -match 'not a signature') 'consumer documentation must describe mandatory self-consistency integrity without claiming authenticity'
     Assert-That ($readme -notmatch '(?i)company integration|later package step|package step') 'product documentation must not contain obsolete internal integration or packaging-stage wording'
 }
 
@@ -40,7 +41,7 @@ $security = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot 'SECURITY.m
 Assert-That ($security -match 'supports the `0\.1\.x` release line' -and $security -match '0\.1\.0') 'supported security versions must name the supported release line'
 Assert-That ($security -notmatch '(?i)intended first|before the first public package|after publication') 'security documentation must remain release-state-neutral'
 Assert-That ($security -match 'product-owned network requests' -and $security -match 'MSBuild project evaluation' -and $security -match 'target projects') 'security documentation must distinguish LogSchema network behavior from target-project evaluation'
-Assert-That ($security -match 'recomputes every parameter form\s+solely from the canonical declared type' -and $security -match 'does not trust a manifest to assert arbitrary type-hierarchy semantics' -and $security -match 'integrity digest') 'security documentation must describe the reader-computed authenticity boundary'
+Assert-That ($security -match 'recomputes every parameter form\s+solely from the canonical declared type' -and $security -match 'does not trust a manifest to assert arbitrary type-hierarchy semantics' -and $security -match 'integrity digest' -and $security -match 'self-consistency check' -and $security -match 'not a signature') 'security documentation must describe the reader-computed integrity boundary'
 Assert-That ($security -notmatch 'current supported release line is v1') 'supported security versions must not use the obsolete v1 line'
 
 $diagnosticCodes = @(1..11 | ForEach-Object { 'KMLOGP{0:D3}' -f $_ })
@@ -48,7 +49,7 @@ $diagnostics = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot 'COMPATI
 foreach ($code in $diagnosticCodes) {
     Assert-That ($diagnostics -match [regex]::Escape($code)) "the diagnostic reference must document $code"
 }
-Assert-That ($diagnostics -match 'additive, subtractive, or substituted difference' -and $diagnostics -match 'analysisErrors' -and $diagnostics -match 'integrity') 'the diagnostic reference must document canonical identity and manifest-integrity validation failure behavior'
+Assert-That ($diagnostics -match 'additive, subtractive, or substituted difference' -and $diagnostics -match 'analysisErrors' -and $diagnostics -match 'integrity' -and $diagnostics -match 'unknown JSON fields' -and $diagnostics -match 'not a signature') 'the diagnostic reference must document canonical identity and manifest-integrity validation failure behavior'
 Assert-That ($diagnostics -match 'comparison-time analysis errors' -and $diagnostics -match 'coverageComplete.*false') 'the diagnostic reference must document the comparison analysis-error coverage envelope'
 
 $completeFamilySurfaces = @(
@@ -101,7 +102,7 @@ foreach ($row in @(
     )) {
     Assert-That ($manifest -match $row) "the manifest contract must contain decision-table row: $row"
 }
-Assert-That ($manifest -match 'V1 does not assert semantic base-type classification' -and $manifest -match 'source-semantic analysis to assign the generator-effective parameter role' -and $manifest -match 'SHA-256' -and $manifest -match 'placeholder occurrences') 'the manifest contract must distinguish declared-type forms from source-derived generator roles and persisted integrity'
+Assert-That ($manifest -match 'V1 does not assert semantic base-type classification' -and $manifest -match 'source-semantic analysis to assign the generator-effective parameter role' -and $manifest -match 'SHA-256' -and $manifest -match 'placeholder occurrences' -and $manifest -match 'Status' -and $manifest -match 'Trusted-as-authored, non-contractual' -and $manifest -match 'Unknown extra fields') 'the manifest contract must distinguish declared-type forms from source-derived generator roles and persisted integrity'
 Assert-That ($manifest -match 'comparison-time analysis error' -and $manifest -match 'coverageComplete: false') 'the manifest contract must document the comparison analysis-error envelope'
 $dependencies = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot 'docs/DEPENDENCIES.md')
 Assert-That ($dependencies -match 'nuspec intentionally exposes no external package dependencies' -and $dependencies -match '10\.0\.401') 'dependency documentation must describe the bundled shipping graph and verified SDK'

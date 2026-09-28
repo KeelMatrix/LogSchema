@@ -137,6 +137,56 @@ public sealed class ManifestIntegrityTests
         }
     }
 
+    [Fact]
+    public async Task MissingIntegrityFailsClosedBeforeComparison()
+    {
+        var root = Directory.CreateTempSubdirectory("logschema-integrity-required-");
+        var validPath = Path.Combine(root.FullName, "valid.json");
+        var unsignedPath = Path.Combine(root.FullName, "unsigned.json");
+        try
+        {
+            await ManifestJson.WriteAsync(CreateManifest(), validPath, CancellationToken.None);
+            var unsigned = JsonNode.Parse(await File.ReadAllTextAsync(validPath))!;
+            unsigned.AsObject().Remove("integrity");
+            await File.WriteAllTextAsync(unsignedPath, unsigned.ToJsonString());
+
+            using var output = new StringWriter();
+            using var errors = new StringWriter();
+            var exitCode = await CommandRunner.RunAsync(["diff", unsignedPath, unsignedPath, "--format", "json", "--severity", "all", "--no-telemetry"], output, errors);
+            Assert.Equal(3, exitCode);
+            Assert.Empty(errors.ToString());
+            using var envelope = JsonDocument.Parse(output.ToString());
+            Assert.Contains("unsigned legacy v1", envelope.RootElement.GetProperty("analysisErrors")[0].GetString(), StringComparison.Ordinal);
+            Assert.Empty(envelope.RootElement.GetProperty("findings").EnumerateArray());
+            Assert.False(envelope.RootElement.GetProperty("coverageComplete").GetBoolean());
+        }
+        finally
+        {
+            root.Delete(true);
+        }
+    }
+
+    [Fact]
+    public async Task UnknownManifestFieldsFailClosedEvenWhenKnownContentIsValid()
+    {
+        var root = Directory.CreateTempSubdirectory("logschema-integrity-unknown-");
+        var validPath = Path.Combine(root.FullName, "valid.json");
+        var unknownPath = Path.Combine(root.FullName, "unknown.json");
+        try
+        {
+            await ManifestJson.WriteAsync(CreateManifest(), validPath, CancellationToken.None);
+            var unknown = JsonNode.Parse(await File.ReadAllTextAsync(validPath))!;
+            unknown.AsObject()["futureField"] = "not part of schema v1";
+            await File.WriteAllTextAsync(unknownPath, unknown.ToJsonString());
+
+            await Assert.ThrowsAsync<ManifestReadException>(() => ManifestJson.ReadAsync(unknownPath, CancellationToken.None));
+        }
+        finally
+        {
+            root.Delete(true);
+        }
+    }
+
     private static ManifestDocument CreateManifest() => new(
         1,
         [new ProjectIdentity("P|net8.0", "P", "P", "net8.0")],
