@@ -1,5 +1,7 @@
 # Manifest schema v1
 
+The complete analysis-diagnostic family is `KMLOGP001`, `KMLOGP002`, `KMLOGP003`, `KMLOGP004`, `KMLOGP005`, `KMLOGP006`, `KMLOGP007`, `KMLOGP008`, `KMLOGP009`, `KMLOGP010`, and `KMLOGP011`. The stable definitions and exit behavior are maintained in [COMPATIBILITY-RULES.md](COMPATIBILITY-RULES.md).
+
 The default file is `logschema.json`. The top-level `schemaVersion` is an integer and must be `1`; the package version is independent. A future schema version is rejected rather than reinterpreted.
 
 ## Shape

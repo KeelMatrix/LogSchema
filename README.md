@@ -62,7 +62,7 @@ V1 does not inspect runtime logs, manual/interpolated logging calls, providers, 
 
 ## Compatibility rules
 
-The complete rule matrix and stable diagnostic codes are maintained in [COMPATIBILITY-RULES.md](COMPATIBILITY-RULES.md). In short:
+The complete rule matrix and stable diagnostic codes are maintained in [COMPATIBILITY-RULES.md](COMPATIBILITY-RULES.md). Analysis failures use the complete `KMLOGP001`-`KMLOGP011` family; the matrix defines each code and its exit behavior. In short:
 
 | Change | Default classification | Default CI gate |
 | --- | --- | --- |
@@ -123,6 +123,7 @@ Manifest schema version 1 is documented in [MANIFEST.md](MANIFEST.md). It is UTF
 ## Diagnostics
 
 The stable diagnostic reference is in [COMPATIBILITY-RULES.md](COMPATIBILITY-RULES.md). Text and JSON expose the same finding fields: code, severity, project key, logical identity, event name, affected field, old/new values, and message. Normal diagnostics do not print absolute machine paths.
+The analysis-diagnostic family is complete at `KMLOGP001`, `KMLOGP002`, `KMLOGP003`, `KMLOGP004`, `KMLOGP005`, `KMLOGP006`, `KMLOGP007`, `KMLOGP008`, `KMLOGP009`, `KMLOGP010`, and `KMLOGP011`.
 
 ## Cross-platform and SDK support
 

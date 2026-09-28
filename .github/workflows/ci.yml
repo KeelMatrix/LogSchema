@@ -35,6 +35,10 @@ jobs:
         with:
           global-json-file: global.json
 
+      - name: Run reachable history hygiene guard
+        shell: pwsh
+        run: ./build/Test-HistoryHygiene.ps1
+
       - name: Cache NuGet packages
         uses: actions/cache@v6
         with:

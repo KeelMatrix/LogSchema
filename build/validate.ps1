@@ -22,9 +22,39 @@ if (-not [string]::IsNullOrWhiteSpace($ReleaseVersion)) {
     $msbuildVersionArgument = @("-p:Version=$ReleaseVersion")
 }
 
-if (Test-Path -LiteralPath $artifactRoot) {
-    Remove-Item -LiteralPath $artifactRoot -Recurse -Force
+function Remove-ValidationArtifacts {
+    if (-not (Test-Path -LiteralPath $artifactRoot)) {
+        return
+    }
+
+    $lastError = $null
+    for ($attempt = 1; $attempt -le 5; $attempt++) {
+        try {
+            Remove-Item -LiteralPath $artifactRoot -Recurse -Force -ErrorAction Stop
+            if (-not (Test-Path -LiteralPath $artifactRoot)) {
+                Write-Host "Validation pre-clean passed on attempt $attempt."
+                return
+            }
+        }
+        catch {
+            $lastError = $_
+        }
+
+        if ($attempt -lt 5) {
+            Start-Sleep -Milliseconds 250
+        }
+    }
+
+    $lockedPath = $artifactRoot
+    $remaining = @(Get-ChildItem -LiteralPath $artifactRoot -Recurse -Force -ErrorAction SilentlyContinue | Select-Object -First 1)
+    if ($remaining.Count -gt 0) {
+        $lockedPath = $remaining[0].FullName
+    }
+    $detail = if ($null -eq $lastError) { 'the directory still exists after removal attempts' } else { $lastError.Exception.Message }
+    throw "Validation pre-clean could not remove '$artifactRoot' after 5 attempts; the remaining or locked path is '$lockedPath'. $detail"
 }
+
+Remove-ValidationArtifacts
 New-Item -ItemType Directory -Force -Path $artifactRoot | Out-Null
 
 $script:StageTimings = [System.Collections.Generic.List[object]]::new()
@@ -283,6 +313,7 @@ $env:DOTNET_CLI_TELEMETRY_OPTOUT = '1'
 $env:KEELMATRIX_NO_TELEMETRY = '1'
 
 $solution = Join-Path $repositoryRoot 'LogSchema.slnx'
+Invoke-Timed 'Reachable history hygiene' { Invoke-NestedPwsh -ArgumentList @('-NoProfile', '-NonInteractive', '-File', (Join-Path $repositoryRoot 'build/Test-HistoryHygiene.ps1'), '-RepositoryRoot', $repositoryRoot) }
 Invoke-Timed 'Restore solution' { dotnet restore $solution --configfile $nugetConfig @msbuildVersionArgument --nologo }
 foreach ($fixture in @(
         'fixtures/Phase0.Net8/Phase0.Net8.csproj',
@@ -303,6 +334,7 @@ Invoke-Timed 'Vulnerability audit' {
 Invoke-Timed 'Nested PowerShell launch guard' { Invoke-NestedPwsh -ArgumentList @('-NoProfile', '-NonInteractive', '-File', (Join-Path $repositoryRoot 'build/Test-NestedPwshLaunch.ps1')) }
 Invoke-Timed 'Vulnerability audit regression tests' { Invoke-NestedPwsh -ArgumentList @('-NoProfile', '-NonInteractive', '-File', (Join-Path $repositoryRoot 'build/Test-VulnerabilityReport.Tests.ps1')) }
 Invoke-Timed 'Release contract regression tests' { Invoke-NestedPwsh -ArgumentList @('-NoProfile', '-NonInteractive', '-File', (Join-Path $repositoryRoot 'build/Test-ReleaseVersion.Tests.ps1')) }
+Invoke-Timed 'History hygiene regression tests' { Invoke-NestedPwsh -ArgumentList @('-NoProfile', '-NonInteractive', '-File', (Join-Path $repositoryRoot 'build/Test-HistoryHygiene.Tests.ps1'), '-RepositoryRoot', $repositoryRoot) }
 Invoke-Timed 'Release workflow contract' { Invoke-NestedPwsh -ArgumentList @('-NoProfile', '-NonInteractive', '-File', (Join-Path $repositoryRoot 'build/Test-ReleaseWorkflow.ps1')) }
 Invoke-Timed 'Shipping manifest negative controls' { Invoke-NestedPwsh -ArgumentList @('-NoProfile', '-NonInteractive', '-File', (Join-Path $repositoryRoot 'build/Test-ShippingManifest.ps1'), '-RepositoryRoot', $repositoryRoot) }
 Invoke-Timed 'Pack-safety regression tests' { Invoke-NestedPwsh -ArgumentList @('-NoProfile', '-NonInteractive', '-File', (Join-Path $repositoryRoot 'build/Test-PackSafety.ps1')) }

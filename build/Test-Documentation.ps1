@@ -42,13 +42,49 @@ Assert-That ($security -match 'product-owned network requests' -and $security -m
 Assert-That ($security -match 'recomputes every parameter form\s+solely from the canonical declared type' -and $security -match 'does not trust a manifest to assert arbitrary type-hierarchy semantics') 'security documentation must describe the reader-computed authenticity boundary'
 Assert-That ($security -notmatch 'current supported release line is v1') 'supported security versions must not use the obsolete v1 line'
 
+$diagnosticCodes = @(1..11 | ForEach-Object { 'KMLOGP{0:D3}' -f $_ })
 $diagnostics = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot 'COMPATIBILITY-RULES.md')
-foreach ($number in 1..9) {
-    $code = 'KMLOGP{0:D3}' -f $number
+foreach ($code in $diagnosticCodes) {
     Assert-That ($diagnostics -match [regex]::Escape($code)) "the diagnostic reference must document $code"
 }
 Assert-That ($diagnostics -match 'additive, subtractive, or substituted difference' -and $diagnostics -match 'analysisErrors') 'the diagnostic reference must document canonical identity validation failure behavior'
 Assert-That ($diagnostics -match 'comparison-time analysis errors' -and $diagnostics -match 'coverageComplete.*false') 'the diagnostic reference must document the comparison analysis-error coverage envelope'
+
+$completeFamilySurfaces = @(
+    'README.md',
+    'src/KeelMatrix.LogSchema/README.md',
+    'MANIFEST.md',
+    'docs/PHASE0-FEASIBILITY.md',
+    'src/KeelMatrix.LogSchema.Core/CommandRunner.cs'
+)
+foreach ($relativePath in $completeFamilySurfaces) {
+    $surface = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot $relativePath)
+    foreach ($code in $diagnosticCodes) {
+        Assert-That ($surface -match [regex]::Escape($code)) "$relativePath must name the complete diagnostic family, including $code"
+    }
+}
+
+$rangeStart = [regex]::Escape($diagnosticCodes[0])
+$staleRangeEnd = [regex]::Escape(('KMLOGP{0:D3}' -f 8))
+$staleRangePattern = "$rangeStart\s*(?:-|–|—|to|through)\s*$staleRangeEnd"
+$trackedFiles = @(git -C $repositoryRoot ls-files)
+Assert-That ($LASTEXITCODE -eq 0) 'git must enumerate tracked files for the diagnostic-family sweep'
+foreach ($relativePath in $trackedFiles) {
+    if ($relativePath -eq 'icon.png' -or [IO.Path]::GetExtension($relativePath).ToLowerInvariant() -in @('.png', '.jpg', '.jpeg', '.gif', '.ico', '.dll', '.pdb', '.nupkg', '.snupkg')) {
+        continue
+    }
+
+    $absolutePath = Join-Path $repositoryRoot $relativePath
+    if (-not (Test-Path -LiteralPath $absolutePath -PathType Leaf)) {
+        continue
+    }
+    $bytes = [IO.File]::ReadAllBytes($absolutePath)
+    if (@($bytes | Where-Object { $_ -eq 0 }).Count -gt 0) {
+        continue
+    }
+    $text = [Text.Encoding]::UTF8.GetString($bytes)
+    Assert-That ($text -notmatch $staleRangePattern) "$relativePath contains a stale diagnostic-family upper bound"
+}
 
 $privacy = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot 'PRIVACY.md')
 Assert-That ($privacy -match 'contains no telemetry client' -and $privacy -match 'makes no product-owned network requests') 'privacy claims must match the shipping implementation'

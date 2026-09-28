@@ -339,5 +339,8 @@ Compatibility summary:
   capture does not write a baseline. diff remains a pure manifest comparison.
   Source provenance uses project/, external/up-N/, and generated/ logical identities; unsafe or
   colliding identities return 3 with KMLOGP008 rather than silently sharing a source location.
+  Analysis diagnostics: KMLOGP001, KMLOGP002, KMLOGP003, KMLOGP004, KMLOGP005, KMLOGP006,
+  KMLOGP007, KMLOGP008, KMLOGP009, KMLOGP010, KMLOGP011. See COMPATIBILITY-RULES.md for the
+  complete diagnostic definitions and exit behavior.
 """;
 }
