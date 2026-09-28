@@ -15,7 +15,8 @@ internal sealed record ManifestDocument(
     [property: JsonPropertyName("unsupported")] IReadOnlyList<UnsupportedDeclaration> Unsupported,
     [property: JsonPropertyName("analysisIssues")] IReadOnlyList<AnalysisIssue> AnalysisIssues,
     [property: JsonPropertyName("compilationDiagnosticKinds")] IReadOnlyList<string> CompilationDiagnosticKinds,
-    [property: JsonPropertyName("workspaceDiagnosticKinds")] IReadOnlyList<string> WorkspaceDiagnosticKinds)
+    [property: JsonPropertyName("workspaceDiagnosticKinds")] IReadOnlyList<string> WorkspaceDiagnosticKinds,
+    [property: JsonPropertyName("integrity")] string? Integrity = null)
 {
     internal static ManifestDocument Empty => new(
         1,
@@ -138,15 +139,25 @@ internal static class ManifestJson
         PropertyNameCaseInsensitive = false
     };
 
+    private static readonly JsonSerializerOptions IntegrityOptions = new()
+    {
+        WriteIndented = true,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+        MaxDepth = 32,
+        PropertyNameCaseInsensitive = false
+    };
+
     internal static async Task WriteAsync(ManifestDocument manifest, string path, CancellationToken cancellationToken)
     {
         string? temporaryPath = null;
         try
         {
             Validate(manifest);
-            var canonical = manifest.Canonicalize();
+            var canonical = manifest.Canonicalize() with { Integrity = null };
             Validate(canonical);
-            var json = JsonSerializer.Serialize(canonical, Options)
+            var persisted = canonical with { Integrity = ComputeIntegrity(canonical) };
+            var json = JsonSerializer.Serialize(persisted, Options)
                 .Replace("\r\n", "\n", StringComparison.Ordinal)
                 .Replace('\r', '\n') + "\n";
             var bytes = new UTF8Encoding(false).GetBytes(json);
@@ -308,7 +319,30 @@ internal static class ManifestJson
         var manifest = JsonSerializer.Deserialize<ManifestDocument>(bytes, Options)
             ?? throw new ManifestValidationException("The manifest is empty.");
         Validate(manifest);
+        ValidateIntegrity(manifest);
         return manifest;
+    }
+
+    private static string ComputeIntegrity(ManifestDocument manifest)
+    {
+        var unsigned = manifest with { Integrity = null };
+        var json = JsonSerializer.Serialize(unsigned.Canonicalize(), IntegrityOptions);
+        var bytes = Encoding.UTF8.GetBytes(json);
+        return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes));
+    }
+
+    private static void ValidateIntegrity(ManifestDocument manifest)
+    {
+        if (manifest.Integrity is null)
+        {
+            return;
+        }
+
+        if (manifest.Integrity.Length != 64 || !manifest.Integrity.All(Uri.IsHexDigit) ||
+            !string.Equals(manifest.Integrity, ComputeIntegrity(manifest), StringComparison.Ordinal))
+        {
+            throw new ManifestValidationException("The manifest integrity value does not match its canonical contents.");
+        }
     }
 
     private static void ValidateJsonShape(JsonElement root)
@@ -406,6 +440,10 @@ internal static class ManifestJson
 
         RequireStringArray(root, "compilationDiagnosticKinds");
         RequireStringArray(root, "workspaceDiagnosticKinds");
+        if (root.TryGetProperty("integrity", out var integrity) && integrity.ValueKind != JsonValueKind.String)
+        {
+            throw new ManifestValidationException("The manifest field 'integrity' must be a string when present.");
+        }
     }
 
     private static JsonElement RequiredArray(JsonElement parent, string name)
@@ -609,7 +647,7 @@ internal static class ManifestJson
         }
 
         var dynamicLevel = string.Equals(@event.LevelSource, "Dynamic", StringComparison.Ordinal);
-        if (!LoggerMessageGeneratorSemantics.TryValidateTemplate(semantics, dynamicLevel, @event.Placeholders, out var templateReason))
+        if (!LoggerMessageGeneratorSemantics.TryValidateTemplate(semantics, dynamicLevel, @event.Message, @event.Placeholders, out var templateReason))
         {
             throw new ManifestValidationException(templateReason!);
         }

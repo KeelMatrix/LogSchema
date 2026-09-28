@@ -335,6 +335,9 @@ Compatibility summary:
   Declared type text must be canonical; forms are classified structurally: top-level ILogger arity 0/1,
   exact top-level LogLevel or Exception, else None. Non-canonical text and form contradictions return 3
   with incomplete coverage and no findings. Raw type prefixes and suffixes are never trusted.
+  Manifest reads cross-validate fixed/dynamic level fields and recompute the exact placeholder occurrence
+  sequence from message. New captures include a canonical SHA-256 integrity value; any present mismatch
+  returns 3 before comparison with incomplete coverage and no findings.
   KMLOGP006 means no supported [LoggerMessage] declarations were found; capture/check return 3 and
   capture does not write a baseline. diff remains a pure manifest comparison.
   Source provenance uses project/, external/up-N/, and generated/ logical identities; unsafe or

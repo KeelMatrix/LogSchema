@@ -137,6 +137,12 @@ internal static class LoggerMessageGeneratorSemantics
             return false;
         }
 
+        if (levelSource is not ("Fixed" or "Dynamic"))
+        {
+            reason = "a persisted event has an unknown level source";
+            return false;
+        }
+
         var dynamicLevel = string.Equals(levelSource, "Dynamic", StringComparison.Ordinal);
         if (dynamicLevel)
         {
@@ -146,9 +152,9 @@ internal static class LoggerMessageGeneratorSemantics
                 return false;
             }
         }
-        else if (!string.Equals(levelParameter, firstLevel, StringComparison.Ordinal))
+        else if (string.Equals(level, "Dynamic", StringComparison.Ordinal) || !IsFixedLevel(level) || !string.Equals(levelParameter, firstLevel, StringComparison.Ordinal))
         {
-            reason = "a persisted fixed level source is inconsistent with its first LogLevel parameter";
+            reason = "a persisted fixed level source is inconsistent with its effective level or first LogLevel parameter";
             return false;
         }
 
@@ -159,9 +165,22 @@ internal static class LoggerMessageGeneratorSemantics
     internal static bool TryValidateTemplate(
         LoggerMessageMethodSemantics semantics,
         bool dynamicLevel,
+        string message,
         IReadOnlyList<Placeholder> placeholders,
         out string? reason)
     {
+        if (!LogSchemaExtractor.TryReadPlaceholders(message, out var expectedPlaceholders, out var parseReason))
+        {
+            reason = parseReason;
+            return false;
+        }
+
+        if (!expectedPlaceholders.SequenceEqual(placeholders))
+        {
+            reason = "persisted message placeholders do not match the exact occurrence sequence in the message template";
+            return false;
+        }
+
         foreach (var placeholder in placeholders)
         {
             var parameter = semantics.Parameters.FirstOrDefault(candidate => PlaceholderMatches(candidate.Name, placeholder.Name));
@@ -187,6 +206,9 @@ internal static class LoggerMessageGeneratorSemantics
         reason = null;
         return true;
     }
+
+    internal static bool IsFixedLevel(string? level) =>
+        level is "Trace" or "Debug" or "Information" or "Warning" or "Error" or "Critical" or "None" || int.TryParse(level, out _);
 
     internal static bool IsSupportedGeneratorVersion(IReadOnlySet<string> versions) =>
         versions.Count == 1 && (versions.Contains(SupportedGeneratorAssemblyVersion) || versions.Contains(CurrentStableGeneratorAssemblyVersion));

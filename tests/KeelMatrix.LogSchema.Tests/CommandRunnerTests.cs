@@ -240,6 +240,40 @@ public sealed class CommandRunnerTests
     }
 
     [Fact]
+    public async Task ForgedPlaceholderTokenCannotProduceCleanCheck()
+    {
+        var root = Directory.CreateTempSubdirectory("logschema-forged-token-check-");
+        var capturedPath = Path.Combine(root.FullName, "captured.json");
+        var forgedPath = Path.Combine(root.FullName, "forged.json");
+        try
+        {
+            await CaptureConsumerFixtureAsync(capturedPath);
+            var manifest = JsonNode.Parse(await File.ReadAllTextAsync(capturedPath))!;
+            var targetEvent = manifest["events"]!.AsArray().First(item => item!["placeholders"]!.AsArray().Count > 0)!;
+            targetEvent["placeholders"]![0]!["token"] = "UnrelatedToken";
+            await File.WriteAllTextAsync(forgedPath, manifest.ToJsonString());
+
+            using var output = new StringWriter();
+            using var errors = new StringWriter();
+            var exitCode = await CommandRunner.RunAsync([
+                "check",
+                FindRepositoryFile("tests", "PackageConsumerFixture", "PackageConsumerFixture.csproj"),
+                "--baseline",
+                forgedPath,
+                "--format",
+                "json",
+                "--no-telemetry"
+            ], output, errors);
+
+            AssertAnalysisErrorEnvelope(exitCode, output.ToString(), errors.ToString(), root.FullName);
+        }
+        finally
+        {
+            root.Delete(true);
+        }
+    }
+
+    [Fact]
     public async Task ComparisonAnalysisErrorsReportIncompleteCoverage()
     {
         var root = Directory.CreateTempSubdirectory("logschema-comparison-form-");
@@ -248,18 +282,13 @@ public sealed class CommandRunnerTests
         try
         {
             await CaptureConsumerFixtureAsync(capturedPath);
-            var manifest = JsonNode.Parse(await File.ReadAllTextAsync(capturedPath))!;
-            var projectKey = manifest["projects"]![0]!["key"]!.GetValue<string>();
-            manifest["analysisIssues"] = new JsonArray(new JsonObject
+            var manifest = await ManifestJson.ReadAsync(capturedPath, CancellationToken.None);
+            var projectKey = manifest.Projects[0].Key;
+            var comparisonManifest = manifest with
             {
-                ["projectKey"] = projectKey,
-                ["code"] = "KMLOGP001",
-                ["severity"] = "error",
-                ["message"] = "Synthetic comparison analysis error.",
-                ["declarationKey"] = string.Empty,
-                ["sources"] = new JsonArray()
-            });
-            await File.WriteAllTextAsync(forgedPath, manifest.ToJsonString());
+                AnalysisIssues = [new AnalysisIssue(projectKey, "KMLOGP001", "error", "Synthetic comparison analysis error.", string.Empty, [])]
+            };
+            await ManifestJson.WriteAsync(comparisonManifest, forgedPath, CancellationToken.None);
             _ = await ManifestJson.ReadAsync(forgedPath, CancellationToken.None);
 
             foreach (var arguments in new[]

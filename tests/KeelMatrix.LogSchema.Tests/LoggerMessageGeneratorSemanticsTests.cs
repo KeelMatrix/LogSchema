@@ -72,6 +72,37 @@ public sealed class LoggerMessageGeneratorSemanticsTests
         Assert.True(dynamicSemantics.IsStructuredState("laterLevel", dynamicLevel: true, []));
     }
 
+    [Theory]
+    [InlineData("Fixed", "Information", null, true, false)]
+    [InlineData("Fixed", "Information", "firstLevel", true, true)]
+    [InlineData("Fixed", "Information", "laterLevel", false, true)]
+    [InlineData("Fixed", "Information", "missingLevel", false, true)]
+    [InlineData("Fixed", "Dynamic", null, false, false)]
+    [InlineData("Fixed", "Dynamic", "firstLevel", false, true)]
+    [InlineData("Dynamic", "Dynamic", "firstLevel", true, true)]
+    [InlineData("Dynamic", "Dynamic", null, false, true)]
+    [InlineData("Dynamic", "Dynamic", "laterLevel", false, true)]
+    [InlineData("Dynamic", "Information", "firstLevel", false, true)]
+    [InlineData("Dynamic", "Unknown", "firstLevel", false, true)]
+    [InlineData("Unknown", "Information", null, false, false)]
+    public void PersistedLevelCrossFieldMatrixFailsClosed(string source, string level, string? levelParameter, bool expected, bool hasLevelParameters)
+    {
+        var parameters = hasLevelParameters
+            ? new[]
+            {
+                new ParameterContract("logger", "Microsoft.Extensions.Logging.ILogger", "None", "Logger"),
+                new ParameterContract("firstLevel", "Microsoft.Extensions.Logging.LogLevel", "None", "LogLevel"),
+                new ParameterContract("laterLevel", "Microsoft.Extensions.Logging.LogLevel", "None", "State")
+            }
+            : new[]
+            {
+                new ParameterContract("logger", "Microsoft.Extensions.Logging.ILogger", "None", "Logger")
+            };
+
+        var actual = LoggerMessageGeneratorSemantics.TryCreatePersistedModel(parameters, "logger", null, source, level, levelParameter, out _, out _);
+        Assert.Equal(expected, actual);
+    }
+
     [Fact]
     public void GeneratorTemplateRestrictionsAreSharedByExtractionAndManifestValidation()
     {
@@ -82,8 +113,8 @@ public sealed class LoggerMessageGeneratorSemanticsTests
             new ParameterContract("value", "int", "None", "State")
         };
         Assert.True(LoggerMessageGeneratorSemantics.TryCreatePersistedModel(parameters, "logger", null, "Fixed", "Information", "level", out var semantics, out var reason), reason);
-        Assert.True(LoggerMessageGeneratorSemantics.TryValidateTemplate(semantics, dynamicLevel: false, [new Placeholder("level", "level")], out reason), reason);
-        Assert.False(LoggerMessageGeneratorSemantics.TryValidateTemplate(semantics, dynamicLevel: false, [new Placeholder("logger", "logger")], out reason));
+        Assert.True(LoggerMessageGeneratorSemantics.TryValidateTemplate(semantics, dynamicLevel: false, "Event {level}", [new Placeholder("level", "level")], out reason), reason);
+        Assert.False(LoggerMessageGeneratorSemantics.TryValidateTemplate(semantics, dynamicLevel: false, "Event {logger}", [new Placeholder("logger", "logger")], out reason));
         Assert.Contains("generator-special Logger", reason, StringComparison.Ordinal);
     }
 }

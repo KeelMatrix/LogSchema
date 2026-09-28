@@ -373,6 +373,179 @@ public sealed class ManifestJsonTests
     }
 
     [Fact]
+    public async Task FixedSourceCannotPersistDynamicLevelWithoutALevelParameter()
+    {
+        var root = Directory.CreateTempSubdirectory("logschema-level-integrity-");
+        var path = Path.Combine(root.FullName, "fixed-dynamic.json");
+        var manifest = new ManifestDocument(
+            1,
+            [new ProjectIdentity("P|net8.0", "P", "P", "net8.0")],
+            [new EventContract(
+                "P|net8.0",
+                "P.Logging.Event`0(None:ILogger:Microsoft.Extensions.Logging.ILogger,None:None:int)",
+                "P.Logging",
+                "Event",
+                0,
+                ["None", "None"],
+                1,
+                "Event",
+                "Dynamic",
+                "Event {Value}",
+                [new Placeholder("Value", "Value")],
+                ["ILogger", "None"],
+                new SourceLocation("Logging.cs", 1, "source"),
+                [
+                    new ParameterContract("logger", "Microsoft.Extensions.Logging.ILogger", "None", "Logger"),
+                    new ParameterContract("value", "int", "None", "State")
+                ],
+                [new StructuredStateProperty("value", "Value")],
+                "logger",
+                null,
+                "Fixed",
+                null)],
+            [],
+            [],
+            [],
+            []);
+
+        try
+        {
+            await File.WriteAllTextAsync(path, JsonSerializer.Serialize(manifest));
+            await Assert.ThrowsAsync<ManifestReadException>(() => ManifestJson.ReadAsync(path, CancellationToken.None));
+        }
+        finally
+        {
+            root.Delete(true);
+        }
+    }
+
+    [Fact]
+    public async Task PlaceholderTokensMustBeExactMessageOccurrences()
+    {
+        var root = Directory.CreateTempSubdirectory("logschema-placeholder-integrity-");
+        var path = Path.Combine(root.FullName, "forged-token.json");
+        var manifest = JsonNode.Parse("""
+        {
+          "schemaVersion": 1,
+          "projects": [{ "key": "P|net8.0", "name": "P", "assembly": "P", "targetFramework": "net8.0" }],
+          "events": [{
+            "projectKey": "P|net8.0",
+            "identity": "P.Logging.Event`0(None:ILogger:Microsoft.Extensions.Logging.ILogger,None:None:int)",
+            "containingType": "P.Logging",
+            "method": "Event",
+            "genericArity": 0,
+            "parameterRefKinds": ["None", "None"],
+            "eventId": 1,
+            "eventName": "Event",
+            "level": "Information",
+            "message": "Event {Value,10:000}",
+            "placeholders": [{ "name": "Value", "token": "Unrelated" }],
+            "parameterForms": ["ILogger", "None"],
+            "source": { "file": "Logging.cs", "line": 1, "kind": "source" },
+            "parameters": [
+              { "name": "logger", "type": "Microsoft.Extensions.Logging.ILogger", "refKind": "None", "role": "Logger" },
+              { "name": "value", "type": "int", "refKind": "None", "role": "State" }
+            ],
+            "structuredState": [{ "parameterName": "value", "emittedName": "Value" }],
+            "loggerParameter": "logger",
+            "exceptionParameter": null,
+            "levelSource": "Fixed",
+            "levelParameter": null
+          }],
+          "unsupported": [],
+          "analysisIssues": [],
+          "compilationDiagnosticKinds": [],
+          "workspaceDiagnosticKinds": []
+        }
+        """)!;
+        await File.WriteAllTextAsync(path, manifest.ToJsonString());
+
+        try
+        {
+            await Assert.ThrowsAsync<ManifestReadException>(() => ManifestJson.ReadAsync(path, CancellationToken.None));
+        }
+        finally
+        {
+            root.Delete(true);
+        }
+    }
+
+    [Fact]
+    public async Task PlaceholderOccurrenceMatrixRejectsEveryMessageSequenceMutation()
+    {
+        const string message = "Escaped {{literal}} odd {{{Value}}} repeat {Value} spaces { Value ,10:000 } at {@Value} unicode {Идентификатор}";
+        Assert.True(LogSchemaExtractor.TryReadPlaceholders(message, out var placeholders, out var reason), reason);
+
+        var root = Directory.CreateTempSubdirectory("logschema-placeholder-matrix-");
+        var validPath = Path.Combine(root.FullName, "valid.json");
+        var manifest = new ManifestDocument(
+            1,
+            [new ProjectIdentity("P|net8.0", "P", "P", "net8.0")],
+            [new EventContract(
+                "P|net8.0",
+                "P.Logging.Event`0(None:ILogger:Microsoft.Extensions.Logging.ILogger,None:None:int,None:None:string)",
+                "P.Logging",
+                "Event",
+                0,
+                ["None", "None", "None"],
+                1,
+                "Event",
+                "Information",
+                message,
+                placeholders,
+                ["ILogger", "None", "None"],
+                new SourceLocation("Logging.cs", 1, "source"),
+                [
+                    new ParameterContract("logger", "Microsoft.Extensions.Logging.ILogger", "None", "Logger"),
+                    new ParameterContract("value", "int", "None", "State"),
+                    new ParameterContract("Идентификатор", "string", "None", "State")
+                ],
+                [new StructuredStateProperty("value", "Value"), new StructuredStateProperty("Идентификатор", "Идентификатор")],
+                "logger",
+                null,
+                "Fixed",
+                null)],
+            [],
+            [],
+            [],
+            []);
+
+        await ManifestJson.WriteAsync(manifest, validPath, CancellationToken.None);
+        var validJson = await File.ReadAllTextAsync(validPath);
+        var mutations = new (string Name, Action<JsonNode> Mutate)[]
+        {
+            ("token", node => node["events"]![0]!["placeholders"]![0]!["token"] = "forged"),
+            ("name-casing", node => node["events"]![0]!["placeholders"]![0]!["name"] = "value"),
+            ("surrounding-whitespace", node => node["events"]![0]!["placeholders"]![0]!["name"] = " Value "),
+            ("at-alignment", node => node["events"]![0]!["placeholders"]![0]!["name"] = "@Value"),
+            ("format-delimiter", node => node["events"]![0]!["placeholders"]![2]!["token"] = " Value :10:000 "),
+            ("unicode", node => node["events"]![0]!["placeholders"]![4]!["name"] = "ИдентификатоР"),
+            ("escaped-brace", node => node["events"]![0]!["message"] = "Escaped {literal} odd {{{Value}}} repeat {Value} spaces { Value ,10:000 } at {@Value} unicode {Идентификатор}"),
+            ("repeated-order", node => node["events"]![0]!["placeholders"] = JsonNode.Parse("[{\"name\":\"Value\",\"token\":\"Value\"},{\"name\":\"Value\",\"token\":\"Value\"},{\"name\":\"@Value\",\"token\":\"@Value\"},{\"name\":\"Value\",\"token\":\" Value ,10:000 \"},{\"name\":\"Идентификатор\",\"token\":\"Идентификатор\"}]")),
+            ("missing-occurrence", node => node["events"]![0]!["placeholders"] = JsonNode.Parse("[{\"name\":\"Value\",\"token\":\"Value\"},{\"name\":\"Value\",\"token\":\"Value\"},{\"name\":\"@Value\",\"token\":\"@Value\"},{\"name\":\"Идентификатор\",\"token\":\"Идентификатор\"}]")),
+            ("extra-occurrence", node => node["events"]![0]!["placeholders"] = JsonNode.Parse("[{\"name\":\"Value\",\"token\":\"Value\"},{\"name\":\"Value\",\"token\":\"Value\"},{\"name\":\"Value\",\"token\":\" Value ,10:000 \"},{\"name\":\"@Value\",\"token\":\"@Value\"},{\"name\":\"Идентификатор\",\"token\":\"Идентификатор\"},{\"name\":\"Value\",\"token\":\"Value\"}]")),
+            ("malformed-boundary", node => node["events"]![0]!["message"] = "Escaped {{literal}} odd {{{Value}}} repeat {Value")
+        };
+
+        try
+        {
+            foreach (var (name, mutate) in mutations)
+            {
+                var candidate = JsonNode.Parse(validJson)!;
+                mutate(candidate);
+                candidate.AsObject().Remove("integrity");
+                var path = Path.Combine(root.FullName, name + ".json");
+                await File.WriteAllTextAsync(path, candidate.ToJsonString());
+                await Assert.ThrowsAsync<ManifestReadException>(() => ManifestJson.ReadAsync(path, CancellationToken.None));
+            }
+        }
+        finally
+        {
+            root.Delete(true);
+        }
+    }
+
+    [Fact]
     public async Task SemanticFormDecisionTableCoversEveryFormAtEveryPosition()
     {
         var root = Directory.CreateTempSubdirectory("logschema-form-totality-");

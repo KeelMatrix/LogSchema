@@ -250,6 +250,7 @@ try {
             'additive-form-none' { $targetEvent.parameterForms = @($targetEvent.parameterForms) + 'None' }
             default { throw "Unknown identity mutation: $Mutation" }
         }
+        $tamperedManifest.PSObject.Properties.Remove('integrity')
         $tamperedManifest | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $Destination -Encoding utf8NoBOM
     }
 
@@ -340,6 +341,7 @@ try {
         $matrixManifest.analysisIssues = @()
         $matrixManifest.compilationDiagnosticKinds = @()
         $matrixManifest.workspaceDiagnosticKinds = @()
+        $matrixManifest.PSObject.Properties.Remove('integrity')
         $matrixManifest | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $Destination -Encoding utf8NoBOM
     }
 
@@ -380,6 +382,7 @@ try {
         $targetEvent = @($tamperedManifest.events | Where-Object method -eq 'Event')
         Assert-That ($targetEvent.Count -eq 1) "the installed capture must contain the canonical Event identity for $($mutation.Name)"
         $targetEvent[0].identity = $targetEvent[0].identity.Replace($mutation.Old, $mutation.New, [StringComparison]::Ordinal)
+        $tamperedManifest.PSObject.Properties.Remove('integrity')
         $tamperedBaseline = Join-Path $freshCheckout "tampered-type-$($mutation.Name).json"
         $tamperedManifest | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $tamperedBaseline -Encoding utf8NoBOM
         $selfDiff = Invoke-LocalTool -Label "local-manifest $($mutation.Name) self-diff" -Arguments @('diff', $tamperedBaseline, $tamperedBaseline, '--format', 'json', '--severity', 'all', '--no-telemetry')
@@ -396,6 +399,7 @@ try {
             declarationKey = ''
             sources = @()
         })
+    $comparisonError.PSObject.Properties.Remove('integrity')
     $comparisonError | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $comparisonErrorManifest -Encoding utf8NoBOM
     $comparisonErrorCheck = Invoke-LocalTool -Label 'local-manifest comparison analysis-error check' -Arguments @('check', $consumerProject, '--baseline', $comparisonErrorManifest, '--format', 'json', '--severity', 'all', '--no-telemetry')
     Assert-AnalysisErrorEnvelope -Result $comparisonErrorCheck -Label 'installed comparison analysis-error check' -ForbiddenPath $freshCheckout
@@ -427,6 +431,7 @@ try {
             declarationKey = 'PackageConsumerFixture.Unsupported'
             reason = 'unsupported form'
         })
+    $incompleteManifest.PSObject.Properties.Remove('integrity')
     $incompleteManifest | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $incompleteBaseline -Encoding utf8NoBOM
     $unsupportedCheck = Invoke-LocalTool -Label 'local-manifest unsupported check' -Arguments @('check', $consumerProject, '--baseline', $incompleteBaseline, '--format', 'json', '--no-telemetry')
     Assert-That ($unsupportedCheck.ExitCode -eq 3 -and $unsupportedCheck.Output -match 'KMLOGP007' -and $unsupportedCheck.Output -match 'PackageConsumerFixture\.Unsupported' -and $unsupportedCheck.Output -match 'unsupported form') 'installed check must gate and explain unsupported baseline coverage'

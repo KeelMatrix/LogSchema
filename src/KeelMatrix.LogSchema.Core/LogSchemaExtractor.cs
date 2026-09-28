@@ -884,7 +884,7 @@ internal sealed class LogSchemaExtractor
             return false;
         }
 
-        if (!LoggerMessageGeneratorSemantics.TryValidateTemplate(semantics, dynamicLevel, placeholders, out reason))
+        if (!LoggerMessageGeneratorSemantics.TryValidateTemplate(semantics, dynamicLevel, message, placeholders, out reason))
         {
             return false;
         }
