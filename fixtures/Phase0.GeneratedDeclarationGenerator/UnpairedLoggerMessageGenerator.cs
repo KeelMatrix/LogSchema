@@ -13,7 +13,9 @@ public sealed class UnpairedLoggerMessageGenerator : IIncrementalGenerator
     {
         var options = context.AnalyzerConfigOptionsProvider.Select(static (provider, _) => new GenerationOptions(
             ReadOption(provider.GlobalOptions, "LogSchemaGeneratedTreeCount", 1),
-            ReadOption(provider.GlobalOptions, "LogSchemaGeneratedTreeSize", 0)));
+            ReadOption(provider.GlobalOptions, "LogSchemaGeneratedTreeSize", 0),
+            !provider.GlobalOptions.TryGetValue("build_property.LogSchemaGeneratedTreeDeclarations", out var declarations) ||
+            !string.Equals(declarations, "none", StringComparison.OrdinalIgnoreCase)));
 
         context.RegisterSourceOutput(options, static (productionContext, generation) =>
         {
@@ -23,6 +25,12 @@ public sealed class UnpairedLoggerMessageGenerator : IIncrementalGenerator
                 var hint = generation.Count == 1
                     ? "Unpaired.LoggerMessage.g.cs"
                     : $"Unpaired.LoggerMessage.{index.ToString("D5", CultureInfo.InvariantCulture)}.g.cs";
+                var declaration = generation.IncludeLoggerMessage
+                    ? """
+                        [LoggerMessage(EventId = 1299, Level = LogLevel.Information, Message = "Unpaired generated declaration {Value}")]
+                        public static partial void UnpairedGenerated(ILogger logger, string value);
+                        """
+                    : "public static void UnpairedGenerated() { }";
                 productionContext.AddSource(
                     hint,
                     SourceText.From($$"""
@@ -32,8 +40,7 @@ public sealed class UnpairedLoggerMessageGenerator : IIncrementalGenerator
 
                         public static partial class UnpairedGeneratedLogging{{index}}
                         {
-                            [LoggerMessage(EventId = 1299, Level = LogLevel.Information, Message = "Unpaired generated declaration {Value}")]
-                            public static partial void UnpairedGenerated(ILogger logger, string value);
+                            {{declaration}}
                             // {{padding}}
                         }
                         """, Encoding.UTF8));
@@ -50,13 +57,15 @@ public sealed class UnpairedLoggerMessageGenerator : IIncrementalGenerator
 
     private sealed class GenerationOptions
     {
-        internal GenerationOptions(int count, int size)
+        internal GenerationOptions(int count, int size, bool includeLoggerMessage)
         {
             Count = count;
             Size = size;
+            IncludeLoggerMessage = includeLoggerMessage;
         }
 
         internal int Count { get; }
         internal int Size { get; }
+        internal bool IncludeLoggerMessage { get; }
     }
 }

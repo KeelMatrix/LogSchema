@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using KeelMatrix.LogSchema;
 
@@ -5,6 +6,90 @@ namespace KeelMatrix.LogSchema.Tests;
 
 public sealed class ExtractorTests
 {
+    [Fact]
+    public async Task ImplicitAndExplicitFrameworkSelectionProduceIdenticalIdentity()
+    {
+        var projectPath = FindRepositoryFile("tests", "PackageConsumerFixture", "PackageConsumerFixture.csproj");
+        var root = Directory.CreateTempSubdirectory("logschema-tfm-identity-");
+        var implicitPath = Path.Combine(root.FullName, "implicit.json");
+        var explicitPath = Path.Combine(root.FullName, "explicit.json");
+        try
+        {
+            using var implicitOutput = new StringWriter();
+            using var implicitErrors = new StringWriter();
+            Assert.Equal(0, await CommandRunner.RunAsync(["capture", projectPath, "--output", implicitPath, "--no-telemetry"], implicitOutput, implicitErrors));
+            using var explicitOutput = new StringWriter();
+            using var explicitErrors = new StringWriter();
+            Assert.Equal(0, await CommandRunner.RunAsync(["capture", projectPath, "--tfm", "net8.0", "--output", explicitPath, "--no-telemetry"], explicitOutput, explicitErrors));
+            Assert.Equal(await File.ReadAllTextAsync(implicitPath), await File.ReadAllTextAsync(explicitPath));
+            Assert.Contains("PackageConsumerFixture|net8.0", await File.ReadAllTextAsync(implicitPath), StringComparison.Ordinal);
+
+            using var invalidOutput = new StringWriter();
+            using var invalidErrors = new StringWriter();
+            Assert.Equal(3, await CommandRunner.RunAsync(["capture", projectPath, "--tfm", "net9.0", "--output", Path.Combine(root.FullName, "invalid.json"), "--format", "json", "--no-telemetry"], invalidOutput, invalidErrors));
+            Assert.DoesNotContain("at KeelMatrix", invalidOutput.ToString(), StringComparison.Ordinal);
+            Assert.False(JsonDocument.Parse(invalidOutput.ToString()).RootElement.GetProperty("coverageComplete").GetBoolean());
+        }
+        finally
+        {
+            root.Delete(true);
+        }
+    }
+
+    [Fact]
+    public async Task MultiTargetSelectionRequiresDeclaredFrameworkAndPreservesCanonicalIdentity()
+    {
+        var root = Directory.CreateTempSubdirectory("logschema-multitarget-");
+        var projectPath = Path.Combine(root.FullName, "MultiTarget.csproj");
+        var implicitPath = Path.Combine(root.FullName, "implicit.json");
+        var explicitPath = Path.Combine(root.FullName, "explicit.json");
+        await File.WriteAllTextAsync(projectPath, """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <TargetFrameworks>net8.0;netstandard2.0</TargetFrameworks>
+            <AssemblyName>MultiTarget</AssemblyName>
+          </PropertyGroup>
+          <ItemGroup>
+            <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.1" />
+          </ItemGroup>
+        </Project>
+        """);
+        await File.WriteAllTextAsync(Path.Combine(root.FullName, "Logging.cs"), """
+        using Microsoft.Extensions.Logging;
+        public static partial class MultiTargetLogging
+        {
+            [LoggerMessage(EventId = 1, Level = LogLevel.Information, Message = "Value {value}")]
+            public static partial void Event(ILogger logger, int value);
+        }
+        """);
+        try
+        {
+            await RestoreAsync(projectPath);
+
+            using var implicitOutput = new StringWriter();
+            using var implicitErrors = new StringWriter();
+            Assert.Equal(3, await CommandRunner.RunAsync(["capture", projectPath, "--output", implicitPath, "--format", "json", "--no-telemetry"], implicitOutput, implicitErrors));
+            Assert.Contains("multiple frameworks", implicitOutput.ToString(), StringComparison.OrdinalIgnoreCase);
+            Assert.False(JsonDocument.Parse(implicitOutput.ToString()).RootElement.GetProperty("coverageComplete").GetBoolean());
+
+            using var explicitOutput = new StringWriter();
+            using var explicitErrors = new StringWriter();
+            Assert.Equal(0, await CommandRunner.RunAsync(["capture", projectPath, "--tfm", "net8.0", "--output", explicitPath, "--no-telemetry"], explicitOutput, explicitErrors));
+            var explicitManifest = await File.ReadAllTextAsync(explicitPath);
+            Assert.Contains("MultiTarget|net8.0", explicitManifest, StringComparison.Ordinal);
+
+            using var invalidOutput = new StringWriter();
+            using var invalidErrors = new StringWriter();
+            Assert.Equal(3, await CommandRunner.RunAsync(["capture", projectPath, "--tfm", "net9.0", "--output", Path.Combine(root.FullName, "invalid.json"), "--format", "json", "--no-telemetry"], invalidOutput, invalidErrors));
+            Assert.Contains("not declared", invalidOutput.ToString(), StringComparison.OrdinalIgnoreCase);
+            Assert.False(JsonDocument.Parse(invalidOutput.ToString()).RootElement.GetProperty("coverageComplete").GetBoolean());
+        }
+        finally
+        {
+            root.Delete(true);
+        }
+    }
+
     [Theory]
     [InlineData("escaped {{literal}}", true, "")]
     [InlineData("odd {{{Value}}}", true, "Value")]
@@ -339,5 +424,21 @@ public sealed class ExtractorTests
 
         Assert.NotNull(directory);
         return Path.Combine([directory!.FullName, .. parts]);
+    }
+
+    private static async Task RestoreAsync(string projectPath)
+    {
+        using var process = Process.Start(new ProcessStartInfo
+        {
+            FileName = "dotnet",
+            Arguments = $"restore \"{projectPath}\" --configfile \"{FindRepositoryFile("NuGet.config")}\" --nologo",
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        });
+        Assert.NotNull(process);
+        await process!.WaitForExitAsync();
+        Assert.True(process.ExitCode == 0, await process.StandardError.ReadToEndAsync());
     }
 }

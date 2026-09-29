@@ -1,3 +1,5 @@
+using Microsoft.CodeAnalysis.Text;
+
 namespace KeelMatrix.LogSchema;
 
 internal static class ProjectAnalysisLimits
@@ -178,6 +180,22 @@ internal sealed class ProjectAnalysisBudget
         }
 
         GeneratedSourceBytes = totalBytes;
+    }
+
+    internal void EnsureGeneratedSourceBytesWithinBudget(SourceText text)
+    {
+        var encoding = text.Encoding ?? System.Text.Encoding.UTF8;
+        var upperBound = checked((long)encoding.GetMaxByteCount(text.Length));
+        if (upperBound > ProjectAnalysisLimits.MaxGeneratedSourceBytesPerTree)
+        {
+            throw new ProjectAnalysisException(ProjectAnalysisLimits.GeneratedTreeBytesMessage(upperBound));
+        }
+
+        var aggregateUpperBound = checked(GeneratedSourceBytes + upperBound);
+        if (aggregateUpperBound > ProjectAnalysisLimits.MaxGeneratedSourceBytes)
+        {
+            throw new ProjectAnalysisException(ProjectAnalysisLimits.TotalGeneratedBytesMessage(aggregateUpperBound));
+        }
     }
 
     internal void ObserveLoggerMessageDeclaration()

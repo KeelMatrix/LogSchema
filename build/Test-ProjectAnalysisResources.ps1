@@ -287,6 +287,60 @@ public static partial class GeneratedTreesLogging
     return $projectPath
 }
 
+function New-GeneratedTreeSolutionFixture {
+    param(
+        [Parameter(Mandatory = $true)][string]$Root,
+        [Parameter(Mandatory = $true)][string]$GeneratorProject,
+        [Parameter(Mandatory = $true)][int]$TreeCountPerProject
+    )
+
+    $projectPaths = [Collections.Generic.List[string]]::new()
+    $generatorDirectory = Split-Path -Parent $GeneratorProject
+    $generatorName = [IO.Path]::GetFileNameWithoutExtension($GeneratorProject)
+    $generatorDll = Join-Path $generatorDirectory "bin/Debug/netstandard2.0/$generatorName.dll"
+    for ($projectIndex = 1; $projectIndex -le 2; $projectIndex++) {
+        $projectName = 'GeneratedTrees{0:D2}' -f $projectIndex
+        $projectDirectory = Join-Path $Root $projectName
+        $projectPath = Join-Path $projectDirectory "$projectName.csproj"
+        $projectPaths.Add("$projectName/$projectName.csproj")
+        Write-Utf8File -Path $projectPath -Content @"
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <AssemblyName>$projectName</AssemblyName>
+    <IsPackable>false</IsPackable>
+    <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
+    <LogSchemaGeneratedTreeCount>$TreeCountPerProject</LogSchemaGeneratedTreeCount>
+    <LogSchemaGeneratedTreeSize>0</LogSchemaGeneratedTreeSize>
+    <LogSchemaGeneratedTreeDeclarations>none</LogSchemaGeneratedTreeDeclarations>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.1" />
+    <Analyzer Include="$generatorDll" />
+    <CompilerVisibleProperty Include="LogSchemaGeneratedTreeCount" />
+    <CompilerVisibleProperty Include="LogSchemaGeneratedTreeSize" />
+    <CompilerVisibleProperty Include="LogSchemaGeneratedTreeDeclarations" />
+  </ItemGroup>
+</Project>
+"@
+        Write-Utf8File -Path (Join-Path $projectDirectory 'Logging.cs') -Content @"
+using Microsoft.Extensions.Logging;
+public static partial class GeneratedTreesLogging$projectIndex
+{
+    [LoggerMessage(EventId = $projectIndex, Level = LogLevel.Information, Message = "Generated trees {Value}")]
+    public static partial void Event(ILogger logger, int value);
+}
+"@
+    }
+
+    $forward = New-SolutionFile -Root $Root -Name 'GeneratedTrees' -ProjectPaths $projectPaths.ToArray()
+    $reverse = New-SolutionFile -Root $Root -Name 'GeneratedTreesReversed' -ProjectPaths @($projectPaths[1], $projectPaths[0])
+    return [pscustomobject]@{
+        Forward = $forward
+        Reverse = $reverse
+    }
+}
+
 function New-DeclarationCountFixture {
     param(
         [Parameter(Mandatory = $true)][string]$Root,
@@ -462,6 +516,19 @@ $tooManyGeneratedTrees = New-GeneratedTreeFixture -Root $generatedTreeRoot -Gene
 Restore-Fixture -SolutionOrProject $tooManyGeneratedTrees -NuGetConfig $nugetConfig
 $tooManyGeneratedTreesResult = Invoke-TrackedProcess -FileName 'dotnet' -Arguments @($tool, 'capture', $tooManyGeneratedTrees, '--output', (Join-Path $generatedTreeRoot 'manifest.json'), '--no-telemetry') -TimeoutSeconds 120
 Assert-BoundedAnalysisFailure -Result $tooManyGeneratedTreesResult -Label 'generated-tree count (N+1)' -ResourceText 'generated syntax trees in one project'
+
+$perProjectGeneratedTreeRoot = Join-Path $artifactRoot 'per-project-generated-trees'
+$perProjectGeneratedTrees = New-GeneratedTreeSolutionFixture -Root $perProjectGeneratedTreeRoot -GeneratorProject $generatorProject -TreeCountPerProject 2049
+Restore-Fixture -SolutionOrProject $perProjectGeneratedTrees.Forward -NuGetConfig $nugetConfig
+Restore-Fixture -SolutionOrProject $perProjectGeneratedTrees.Reverse -NuGetConfig $nugetConfig
+$forwardManifest = Join-Path $perProjectGeneratedTreeRoot 'forward.json'
+$reverseManifest = Join-Path $perProjectGeneratedTreeRoot 'reverse.json'
+$forwardResult = Invoke-TrackedProcess -FileName 'dotnet' -Arguments @($tool, 'capture', $perProjectGeneratedTrees.Forward, '--tfm', 'net8.0', '--output', $forwardManifest, '--format', 'json', '--no-telemetry') -TimeoutSeconds 120
+$reverseResult = Invoke-TrackedProcess -FileName 'dotnet' -Arguments @($tool, 'capture', $perProjectGeneratedTrees.Reverse, '--tfm', 'net8.0', '--output', $reverseManifest, '--format', 'json', '--no-telemetry') -TimeoutSeconds 120
+Assert-That ($forwardResult.ExitCode -eq 0) "two-project generated-tree fixture failed: $($forwardResult.Stderr) $($forwardResult.Stdout)"
+Assert-That ($reverseResult.ExitCode -eq 0) "reversed two-project generated-tree fixture failed: $($reverseResult.Stderr) $($reverseResult.Stdout)"
+Assert-That ((Get-FileHash -LiteralPath $forwardManifest -Algorithm SHA256).Hash -eq (Get-FileHash -LiteralPath $reverseManifest -Algorithm SHA256).Hash) 'reordering projects must preserve the canonical manifest'
+Write-Host ("Per-project generated-tree lifecycle: projects=2 treesPerProject=2049 totalTrees=4098 forward={0:N2}s reverse={1:N2}s" -f $forwardResult.ElapsedSeconds, $reverseResult.ElapsedSeconds)
 
 $largeGeneratedTreeRoot = Join-Path $artifactRoot 'too-large-generated-tree'
 $largeGeneratedTree = New-GeneratedTreeFixture -Root $largeGeneratedTreeRoot -GeneratorProject $generatorProject -TreeCount 1 -TreeSize (4MB + 1)

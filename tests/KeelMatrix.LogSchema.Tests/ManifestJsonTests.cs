@@ -7,6 +7,14 @@ namespace KeelMatrix.LogSchema.Tests;
 
 public sealed class ManifestJsonTests
 {
+    private static readonly JsonSerializerOptions IntegritySigningOptions = new()
+    {
+        WriteIndented = true,
+        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
+        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+        MaxDepth = 32
+    };
+
     [Theory]
     [InlineData("Microsoft.Extensions.Logging.ILogger", "ILogger")]
     [InlineData("Microsoft.Extensions.Logging.ILogger<P.Category>", "ILogger")]
@@ -108,6 +116,103 @@ public sealed class ManifestJsonTests
         finally
         {
             Directory.Delete(root, true);
+        }
+    }
+
+    [Fact]
+    public async Task DuplicateDecodedPropertiesFailBeforeDeserializationAndComparison()
+    {
+        var root = Directory.CreateTempSubdirectory("logschema-duplicate-properties-");
+        var validPath = Path.Combine(root.FullName, "valid.json");
+        await ManifestJson.WriteAsync(new ManifestDocument(
+            1,
+            [new ProjectIdentity("P|net8.0", "P", "P", "net8.0")],
+            [SyntheticEvent("P.Logging.Event`0(None:ILogger:Microsoft.Extensions.Logging.ILogger,None:None:int)", "Event", ["ILogger", "None"], ["Microsoft.Extensions.Logging.ILogger", "int"])],
+            [], [], [], []), validPath, CancellationToken.None);
+        var original = await File.ReadAllTextAsync(validPath);
+        var candidates = new (string Name, string Json)[]
+        {
+            ("root-conflict", original.Replace("\"schemaVersion\": 1", "\"schemaVersion\": 2,\n  \"schemaVersion\": 1", StringComparison.Ordinal)),
+            ("root-escaped-equivalent", original.Replace("\"schemaVersion\": 1", "\"schemaVersion\": 2,\n  \"schema\\u0056ersion\": 1", StringComparison.Ordinal)),
+            ("nested-identical", original.Replace("\"name\": \"P\"", "\"name\": \"P\", \"name\": \"P\"", StringComparison.Ordinal))
+        };
+
+        try
+        {
+            foreach (var candidate in candidates)
+            {
+                var path = Path.Combine(root.FullName, candidate.Name + ".json");
+                await File.WriteAllTextAsync(path, candidate.Json);
+                await Assert.ThrowsAsync<ManifestReadException>(() => ManifestJson.ReadAsync(path, CancellationToken.None));
+
+                using var output = new StringWriter();
+                using var errors = new StringWriter();
+                var exitCode = await CommandRunner.RunAsync(["diff", path, path, "--format", "json", "--severity", "all", "--no-telemetry"], output, errors);
+                Assert.Equal(3, exitCode);
+                Assert.Empty(errors.ToString());
+                using var envelope = JsonDocument.Parse(output.ToString());
+                Assert.Empty(envelope.RootElement.GetProperty("findings").EnumerateArray());
+                Assert.False(envelope.RootElement.GetProperty("coverageComplete").GetBoolean());
+            }
+        }
+        finally
+        {
+            root.Delete(true);
+        }
+    }
+
+    [Fact]
+    public async Task ReSignedRoleContradictionsAndNumericAliasesFailClosed()
+    {
+        var root = Directory.CreateTempSubdirectory("logschema-semantic-boundary-");
+        var validPath = Path.Combine(root.FullName, "valid.json");
+        var baseManifest = new ManifestDocument(
+            1,
+            [new ProjectIdentity("P|net8.0", "P", "P", "net8.0")],
+            [SyntheticEvent("P.Logging.Event`0(None:ILogger:Microsoft.Extensions.Logging.ILogger,None:None:int)", "Event", ["ILogger", "None"], ["Microsoft.Extensions.Logging.ILogger", "int"])],
+            [], [], [], []);
+        await ManifestJson.WriteAsync(baseManifest, validPath, CancellationToken.None);
+        var original = JsonNode.Parse(await File.ReadAllTextAsync(validPath))!;
+        try
+        {
+            var roleForgery = JsonNode.Parse(original.ToJsonString())!;
+            roleForgery["events"]![0]!["parameters"]![0]!["role"] = "State";
+            roleForgery["events"]![0]!["parameters"]![1]!["role"] = "Logger";
+            roleForgery["events"]![0]!["loggerParameter"] = "parameter1";
+            var rolePath = Path.Combine(root.FullName, "role-forgery.json");
+            await File.WriteAllTextAsync(rolePath, Sign(roleForgery).ToJsonString());
+            await Assert.ThrowsAsync<ManifestReadException>(() => ManifestJson.ReadAsync(rolePath, CancellationToken.None));
+
+            foreach (var level in new[] { "+2", "02", " 2 ", "-02" })
+            {
+                var alias = JsonNode.Parse(original.ToJsonString())!;
+                alias["events"]![0]!["level"] = level;
+                var aliasPath = Path.Combine(root.FullName, "level-" + level.Trim().Replace('+', 'p').Replace('-', 'm') + ".json");
+                await File.WriteAllTextAsync(aliasPath, Sign(alias).ToJsonString());
+                await Assert.ThrowsAsync<ManifestReadException>(() => ManifestJson.ReadAsync(aliasPath, CancellationToken.None));
+            }
+
+            foreach (var level in new[] { "2", int.MinValue.ToString(System.Globalization.CultureInfo.InvariantCulture), int.MaxValue.ToString(System.Globalization.CultureInfo.InvariantCulture) })
+            {
+                var canonical = JsonNode.Parse(original.ToJsonString())!;
+                canonical["events"]![0]!["level"] = level;
+                var canonicalPath = Path.Combine(root.FullName, "level-canonical-" + level.Replace('-', 'm') + ".json");
+                await File.WriteAllTextAsync(canonicalPath, Sign(canonical).ToJsonString());
+                _ = await ManifestJson.ReadAsync(canonicalPath, CancellationToken.None);
+            }
+        }
+        finally
+        {
+            root.Delete(true);
+        }
+
+        static JsonNode Sign(JsonNode candidate)
+        {
+            candidate.AsObject().Remove("integrity");
+            var model = JsonSerializer.Deserialize<ManifestDocument>(candidate.ToJsonString())!;
+            var unsigned = JsonSerializer.Serialize(model.Canonicalize() with { Integrity = null }, IntegritySigningOptions);
+            candidate.AsObject()["integrity"] = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(unsigned)));
+            return candidate;
         }
     }
 

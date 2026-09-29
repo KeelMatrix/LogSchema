@@ -53,6 +53,29 @@ public sealed class ProjectAnalysisLimitsTests
     }
 
     [Fact]
+    public void GeneratedTreeCeilingResetsPerProjectWhileBytesRemainAggregate()
+    {
+        var budget = new ProjectAnalysisBudget();
+        budget.BeginProject();
+        for (var index = 0; index < ProjectAnalysisLimits.MaxGeneratedSyntaxTreesPerProject; index++)
+        {
+            budget.ObserveGeneratedSyntaxTree();
+        }
+
+        budget.BeginProject();
+        budget.ObserveGeneratedSyntaxTree();
+
+        var bytes = new ProjectAnalysisBudget();
+        for (var index = 0; index < ProjectAnalysisLimits.MaxGeneratedSourceBytes / ProjectAnalysisLimits.MaxGeneratedSourceBytesPerTree; index++)
+        {
+            bytes.ObserveGeneratedSourceBytes(ProjectAnalysisLimits.MaxGeneratedSourceBytesPerTree);
+        }
+
+        bytes.BeginProject();
+        Assert.Throws<ProjectAnalysisException>(() => bytes.ObserveGeneratedSourceBytes(1));
+    }
+
+    [Fact]
     public void DeclarationEventAndUnsupportedCeilingsAcceptNAndRejectNPlusOne()
     {
         var declarations = new ProjectAnalysisBudget();

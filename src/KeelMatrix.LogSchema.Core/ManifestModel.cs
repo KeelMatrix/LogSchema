@@ -82,7 +82,8 @@ internal sealed record ParameterContract(
     [property: JsonPropertyName("name")] string Name,
     [property: JsonPropertyName("type")] string Type,
     [property: JsonPropertyName("refKind")] string RefKind,
-    [property: JsonPropertyName("role")] string Role);
+    [property: JsonPropertyName("role")] string Role,
+    [property: JsonPropertyName("codeName"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? CodeName = null);
 
 internal sealed record StructuredStateProperty(
     [property: JsonPropertyName("parameterName")] string ParameterName,
@@ -404,11 +405,15 @@ internal static class ManifestJson
             foreach (var parameter in RequiredArray(@event, "parameters").EnumerateArray())
             {
                 RequireObject(parameter, "parameters");
-                RejectUnknownProperties(parameter, "parameter", "name", "type", "refKind", "role");
+                RejectUnknownProperties(parameter, "parameter", "name", "type", "refKind", "role", "codeName");
                 RequireString(parameter, "name");
                 RequireString(parameter, "type");
                 RequireString(parameter, "refKind");
                 RequireString(parameter, "role");
+                if (parameter.TryGetProperty("codeName", out var codeName) && codeName.ValueKind is not (JsonValueKind.String or JsonValueKind.Null))
+                {
+                    throw new ManifestValidationException("The manifest parameter field 'codeName' must be a string or null.");
+                }
             }
             foreach (var property in RequiredArray(@event, "structuredState").EnumerateArray())
             {
@@ -464,8 +469,14 @@ internal static class ManifestJson
     private static void RejectUnknownProperties(JsonElement value, string context, params string[] knownNames)
     {
         var known = knownNames.ToHashSet(StringComparer.Ordinal);
+        var seen = new HashSet<string>(StringComparer.Ordinal);
         foreach (var property in value.EnumerateObject())
         {
+            if (!seen.Add(property.Name))
+            {
+                throw new ManifestValidationException($"The manifest contains duplicate field '{property.Name}' in {context}.");
+            }
+
             if (!known.Contains(property.Name))
             {
                 throw new ManifestValidationException($"The manifest contains unknown field '{property.Name}' in {context}.");
@@ -634,7 +645,9 @@ internal static class ManifestJson
         }
     }
 
-    private static bool IsEffectiveLevel(string? level) => level is "Trace" or "Debug" or "Information" or "Warning" or "Error" or "Critical" or "None" or "Dynamic" || int.TryParse(level, out _);
+    private static bool IsEffectiveLevel(string? level) => level is "Trace" or "Debug" or "Information" or "Warning" or "Error" or "Critical" or "None" or "Dynamic" ||
+        int.TryParse(level, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var numeric) &&
+        string.Equals(level, numeric.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal);
 
     private static bool IsLevelSource(string? source) => source is "Fixed" or "Dynamic";
 
@@ -651,12 +664,19 @@ internal static class ManifestJson
         {
             var parameter = @event.Parameters[index];
             var identityParameter = identity.Parameters[index];
-            if (string.IsNullOrWhiteSpace(parameter.Name) || !IsCanonicalIdentifier(parameter.Name) || !names.Add(parameter.Name) ||
+            var codeName = parameter.CodeName ?? parameter.Name;
+            if (string.IsNullOrWhiteSpace(parameter.Name) || !IsCanonicalIdentifier(parameter.Name) ||
+                string.IsNullOrWhiteSpace(codeName) || !IsCanonicalCodeIdentifier(codeName) || !names.Add(parameter.Name) ||
                 !string.Equals(parameter.Type, identityParameter.Type, StringComparison.Ordinal) ||
                 !string.Equals(parameter.RefKind, identityParameter.RefKind, StringComparison.Ordinal) ||
                 !ParameterRefKinds.Contains(parameter.RefKind))
             {
                 throw new ManifestValidationException("A manifest event effective parameter model contains an invalid or contradictory parameter.");
+            }
+
+            if (!IsRoleCompatibleWithCanonicalType(parameter.Role, parameter.Type))
+            {
+                throw new ManifestValidationException("A manifest event parameter role contradicts its canonical declared type.");
             }
         }
 
@@ -692,7 +712,7 @@ internal static class ManifestJson
             }
 
             var parameter = @event.Parameters[index];
-            var expectedEmittedName = LoggerMessageGeneratorSemantics.EmittedName(parameter.Name, @event.Placeholders);
+            var expectedEmittedName = LoggerMessageGeneratorSemantics.EmittedName(parameter.Name, parameter.CodeName ?? parameter.Name, @event.Placeholders);
             if (!string.Equals(property.EmittedName, expectedEmittedName, StringComparison.Ordinal))
             {
                 throw new ManifestValidationException("A manifest structured state model has an emitted name that contradicts its template or parameter name.");
@@ -955,6 +975,39 @@ internal static class ManifestJson
 
     private static bool IsCanonicalIdentifier(string value) =>
         SyntaxFacts.IsValidIdentifier(value) || SyntaxFacts.GetKeywordKind(value) != SyntaxKind.None;
+
+    private static bool IsCanonicalCodeIdentifier(string value)
+    {
+        var semanticName = value.StartsWith('@') ? value[1..] : value;
+        return semanticName.Length > 0 && value.Count(character => character == '@') <= 1 &&
+            (SyntaxFacts.IsValidIdentifier(semanticName) || SyntaxFacts.GetKeywordKind(semanticName) != SyntaxKind.None);
+    }
+
+    private static bool IsRoleCompatibleWithCanonicalType(string role, string type)
+    {
+        if (!LoggerMessageGeneratorSemantics.TryParseRole(role, out var roles))
+        {
+            return false;
+        }
+
+        var requiredForm = GetRequiredParameterForm(type);
+        if (roles.HasFlag(GeneratorParameterRoles.Logger) && requiredForm is "Exception" or "LogLevel" ||
+            roles.HasFlag(GeneratorParameterRoles.Exception) && requiredForm is "ILogger" or "LogLevel" ||
+            roles.HasFlag(GeneratorParameterRoles.LogLevel) && requiredForm is "ILogger" or "Exception")
+        {
+            return false;
+        }
+
+        return requiredForm != "None" || !IsKnownNonInheritableType(type) || roles == GeneratorParameterRoles.None;
+    }
+
+    private static bool IsKnownNonInheritableType(string type) => type is
+        "bool" or "byte" or "sbyte" or "char" or "decimal" or "double" or "float" or "int" or "uint" or
+        "long" or "ulong" or "nint" or "nuint" or "short" or "ushort" or "string" or "object" or
+        "System.Boolean" or "System.Byte" or "System.SByte" or "System.Char" or "System.Decimal" or
+        "System.Double" or "System.Single" or "System.Int32" or "System.UInt32" or "System.Int64" or
+        "System.UInt64" or "System.IntPtr" or "System.UIntPtr" or "System.Int16" or "System.UInt16" or
+        "System.String" or "System.Object";
 
     private static void ValidateJsonSource(JsonElement parent, string name)
     {

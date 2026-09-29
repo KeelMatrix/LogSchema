@@ -301,6 +301,93 @@ public sealed class CommandRunnerTests
         }
     }
 
+    [Fact]
+    public async Task SlnxPreflightFailuresStayInsideTextAndJsonAnalysisContracts()
+    {
+        var root = Directory.CreateTempSubdirectory("logschema-slnx-errors-");
+        var inputs = new[]
+        {
+            ("malformed", "<Solution><Project Path=\"missing.csproj\"></Solution>"),
+            ("truncated", "<Solution><Project Path=\"missing.csproj\" />"),
+            ("dtd", "<!DOCTYPE Solution [ <!ENTITY xxe SYSTEM \"file:///private/secret.txt\"> ]><Solution />")
+        };
+        try
+        {
+            foreach (var (name, content) in inputs)
+            {
+                var path = Path.Combine(root.FullName, name + ".slnx");
+                await File.WriteAllTextAsync(path, content);
+                using var textOutput = new StringWriter();
+                using var textErrors = new StringWriter();
+                Assert.Equal(3, await CommandRunner.RunAsync(["capture", path, "--output", Path.Combine(root.FullName, "out.json"), "--no-telemetry"], textOutput, textErrors));
+                Assert.Contains("ANALYSIS ERROR", textErrors.ToString(), StringComparison.Ordinal);
+                Assert.DoesNotContain("at KeelMatrix", textErrors.ToString(), StringComparison.Ordinal);
+                Assert.DoesNotContain(root.FullName, textErrors.ToString(), StringComparison.OrdinalIgnoreCase);
+
+                using var jsonOutput = new StringWriter();
+                using var jsonErrors = new StringWriter();
+                Assert.Equal(3, await CommandRunner.RunAsync(["capture", path, "--output", Path.Combine(root.FullName, "out.json"), "--format", "json", "--no-telemetry"], jsonOutput, jsonErrors));
+                Assert.Empty(jsonErrors.ToString());
+                using var envelope = JsonDocument.Parse(jsonOutput.ToString());
+                Assert.Empty(envelope.RootElement.GetProperty("findings").EnumerateArray());
+                Assert.False(envelope.RootElement.GetProperty("coverageComplete").GetBoolean());
+                Assert.DoesNotContain("at KeelMatrix", jsonOutput.ToString(), StringComparison.Ordinal);
+                Assert.DoesNotContain(root.FullName, jsonOutput.ToString(), StringComparison.OrdinalIgnoreCase);
+            }
+        }
+        finally
+        {
+            root.Delete(true);
+        }
+    }
+
+    [Fact]
+    public async Task EscapedKeywordTypeIsReportedWithoutEscapingTheCliErrorContract()
+    {
+        var root = Directory.CreateTempSubdirectory("logschema-escaped-type-");
+        var projectPath = Path.Combine(root.FullName, "Escaped.csproj");
+        await File.WriteAllTextAsync(projectPath, """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup><TargetFramework>net8.0</TargetFramework></PropertyGroup>
+          <ItemGroup><PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.1" /></ItemGroup>
+        </Project>
+        """);
+        await File.WriteAllTextAsync(Path.Combine(root.FullName, "Logging.cs"), """
+        using Microsoft.Extensions.Logging;
+        namespace N;
+        public sealed class @event { }
+        public static partial class Logging
+        {
+            [LoggerMessage(EventId = 1, Level = LogLevel.Information, Message = "Value {value}")]
+            public static partial void Value(ILogger logger, N.@event value);
+        }
+        """);
+        try
+        {
+            foreach (var format in new[] { "text", "json" })
+            {
+                using var output = new StringWriter();
+                using var errors = new StringWriter();
+                var args = new[] { "capture", projectPath, "--output", Path.Combine(root.FullName, "manifest.json"), "--format", format, "--no-telemetry" };
+                Assert.Equal(3, await CommandRunner.RunAsync(args, output, errors));
+                var combined = output.ToString() + errors.ToString();
+                Assert.DoesNotContain("at KeelMatrix", combined, StringComparison.Ordinal);
+                Assert.DoesNotContain(root.FullName, combined, StringComparison.OrdinalIgnoreCase);
+                if (format == "json")
+                {
+                    Assert.Empty(errors.ToString());
+                    using var envelope = JsonDocument.Parse(output.ToString());
+                    Assert.Empty(envelope.RootElement.GetProperty("findings").EnumerateArray());
+                    Assert.False(envelope.RootElement.GetProperty("coverageComplete").GetBoolean());
+                }
+            }
+        }
+        finally
+        {
+            root.Delete(true);
+        }
+    }
+
     private static async Task CaptureConsumerFixtureAsync(string outputPath)
     {
         using var output = new StringWriter();

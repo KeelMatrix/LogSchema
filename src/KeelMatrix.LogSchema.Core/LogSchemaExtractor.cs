@@ -9,6 +9,7 @@ using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Diagnostics;
 using Microsoft.CodeAnalysis.MSBuild;
+using Microsoft.CodeAnalysis.Text;
 
 namespace KeelMatrix.LogSchema;
 
@@ -31,12 +32,18 @@ internal sealed class LogSchemaExtractor
         var budget = new ProjectAnalysisBudget();
         await ProjectAnalysisPreflight.ValidateAsync(fullPath, budget, cancellationToken);
 
-        if (!MSBuildLocator.IsRegistered)
+        try
         {
-            MSBuildLocator.RegisterDefaults();
+            if (!MSBuildLocator.IsRegistered)
+            {
+                MSBuildLocator.RegisterDefaults();
+            }
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or FileNotFoundException or FileLoadException or BadImageFormatException)
+        {
+            throw new ProjectAnalysisException("The .NET SDK workspace could not be initialized.");
         }
 
-        var workspaceDiagnostics = new List<string>();
         var properties = new Dictionary<string, string>
         {
             ["DesignTimeBuild"] = "true",
@@ -47,7 +54,31 @@ internal sealed class LogSchemaExtractor
             properties["TargetFramework"] = targetFramework;
         }
 
-        using var workspace = MSBuildWorkspace.Create(properties);
+        MSBuildWorkspace workspace;
+        try
+        {
+            workspace = MSBuildWorkspace.Create(properties);
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or FileNotFoundException or FileLoadException or BadImageFormatException)
+        {
+            throw new ProjectAnalysisException("The project workspace could not be created.");
+        }
+
+        using (workspace)
+        {
+            return await ExtractFromWorkspaceAsync(workspace, fullPath, targetFramework, properties, budget, cancellationToken);
+        }
+    }
+
+    private static async Task<ManifestDocument> ExtractFromWorkspaceAsync(
+        MSBuildWorkspace workspace,
+        string fullPath,
+        string? targetFramework,
+        IReadOnlyDictionary<string, string> properties,
+        ProjectAnalysisBudget budget,
+        CancellationToken cancellationToken)
+    {
+        var workspaceDiagnostics = new List<string>();
         workspace.WorkspaceFailed += (_, eventArgs) => workspaceDiagnostics.Add(eventArgs.Diagnostic.Kind.ToString());
 
         Project[] projects;
@@ -96,6 +127,7 @@ internal sealed class LogSchemaExtractor
         foreach (var project in projects)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            budget.BeginProject();
             Compilation? compilation;
             try
             {
@@ -111,7 +143,7 @@ internal sealed class LogSchemaExtractor
                 throw new ProjectAnalysisException($"Compilation load failed for {project.Name}: no compilation was returned.");
             }
 
-            var actualTargetFramework = string.IsNullOrWhiteSpace(targetFramework) ? "unspecified" : targetFramework;
+            var actualTargetFramework = ResolveTargetFramework(project.FilePath, targetFramework, properties);
             var assembly = compilation.AssemblyName ?? project.Name;
             var projectKey = assembly + "|" + actualTargetFramework;
             var identity = new ProjectIdentity(projectKey, project.Name, assembly, actualTargetFramework);
@@ -211,6 +243,68 @@ internal sealed class LogSchemaExtractor
         return Encoding.UTF8.GetByteCount(text.ToString());
     }
 
+    private static string ResolveTargetFramework(string? projectPath, string? requestedTargetFramework, IReadOnlyDictionary<string, string> workspaceProperties)
+    {
+        if (string.IsNullOrWhiteSpace(projectPath))
+        {
+            throw new ProjectAnalysisException("The evaluated project did not expose a target framework; specify --tfm.");
+        }
+
+        try
+        {
+            var globals = workspaceProperties.ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal);
+            globals.Remove("TargetFramework");
+            using var collection = new Microsoft.Build.Evaluation.ProjectCollection(globals);
+            var evaluated = collection.LoadProject(projectPath, globals, null);
+            var candidates = new List<string>();
+            var single = evaluated.GetPropertyValue("TargetFramework").Trim();
+            if (!string.IsNullOrEmpty(single))
+            {
+                candidates.Add(single);
+            }
+
+            foreach (var framework in evaluated.GetPropertyValue("TargetFrameworks").Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                if (!candidates.Contains(framework, StringComparer.OrdinalIgnoreCase))
+                {
+                    candidates.Add(framework);
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(requestedTargetFramework))
+            {
+                var requested = requestedTargetFramework.Trim();
+                var match = candidates.FirstOrDefault(candidate => string.Equals(candidate, requested, StringComparison.OrdinalIgnoreCase));
+                if (match is null)
+                {
+                    throw new ProjectAnalysisException($"Target framework '{requested}' is not declared by the evaluated project.");
+                }
+
+                return match;
+            }
+
+            if (candidates.Count == 1)
+            {
+                return candidates[0];
+            }
+
+            if (candidates.Count > 1)
+            {
+                throw new ProjectAnalysisException("The project targets multiple frameworks; specify --tfm.");
+            }
+
+            throw new ProjectAnalysisException("The evaluated project did not expose a target framework; specify --tfm.");
+        }
+        catch (ProjectAnalysisException)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            throw new ProjectAnalysisException("The target framework could not be read from the evaluated project.");
+        }
+    }
+
     private static class ProjectAnalysisPreflight
     {
         private static readonly Regex SolutionProjectLine = new(
@@ -242,7 +336,15 @@ internal sealed class LogSchemaExtractor
                     throw new ProjectAnalysisException(ProjectAnalysisLimits.SolutionFileBytesMessage(fileLength));
                 }
 
-                var projectCount = await CountSlnxProjectsAsync(inputPath, cancellationToken);
+                int projectCount;
+                try
+                {
+                    projectCount = await CountSlnxProjectsAsync(inputPath, cancellationToken);
+                }
+                catch (XmlException)
+                {
+                    throw new ProjectAnalysisException("Solution preflight failed: the .slnx XML is malformed or uses a prohibited DTD.");
+                }
                 if (projectCount > 0)
                 {
                     budget.ObserveProjectCount(projectCount);
@@ -329,6 +431,7 @@ internal sealed class LogSchemaExtractor
         private readonly Dictionary<string, int> remainingPinnedCompiledImplementations = new(StringComparer.Ordinal);
         private readonly HashSet<string> pairedGeneratedDeclarations = new(StringComparer.Ordinal);
         private readonly Dictionary<string, string> generatorDiagnosticDeclarations = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, SourceText> generatedTextByPath = new(StringComparer.Ordinal);
         private readonly HashSet<string> generatorDiagnosticKinds = new(StringComparer.Ordinal);
         private readonly SourceProvenanceRegistry sourceProvenance = new();
         private readonly HashSet<string> reportedProvenanceCollisions = new(StringComparer.Ordinal);
@@ -362,7 +465,7 @@ internal sealed class LogSchemaExtractor
             var projectSourceTrees = scannedTrees.ToArray();
             var syntaxTrees = compilation.SyntaxTrees.ToArray();
             budget.ObserveSyntaxTrees(syntaxTrees.Length);
-            var compiledGeneratedTrees = new List<GeneratedSyntaxTree>();
+            var compiledGeneratedTrees = new List<SyntaxTree>();
             foreach (var tree in syntaxTrees)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -371,18 +474,7 @@ internal sealed class LogSchemaExtractor
                     continue;
                 }
 
-                budget.ObserveGeneratedSyntaxTree();
-                var text = tree.GetText(cancellationToken);
-                if (text.Length > ProjectAnalysisLimits.MaxGeneratedSourceBytesPerTree)
-                {
-                    throw new ProjectAnalysisException(ProjectAnalysisLimits.GeneratedTreeBytesMessage(text.Length));
-                }
-
-                var generatedText = text.ToString();
-                var generatedBytes = (text.Encoding ?? Encoding.UTF8).GetByteCount(generatedText);
-                budget.ObserveGeneratedSourceBytes(generatedBytes);
-                var logicalPath = SourceProvenance.NormalizeGeneratedPath(tree.FilePath, generatedText);
-                compiledGeneratedTrees.Add(new GeneratedSyntaxTree(tree, logicalPath, generatedText));
+                compiledGeneratedTrees.Add(tree);
             }
 
             var generatorRun = RunPinnedGenerator(projectSourceTrees, cancellationToken);
@@ -391,20 +483,23 @@ internal sealed class LogSchemaExtractor
                 AddGeneratorDiagnostic(diagnostic);
             }
 
-            foreach (var generatedTree in generatorRun.GeneratedTrees.OrderBy(tree => tree.LogicalPath, StringComparer.Ordinal))
+            foreach (var generatedTree in generatorRun.GeneratedTrees.OrderBy(tree => tree.Tree.FilePath, StringComparer.Ordinal))
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                budget.ObserveGeneratedSyntaxTree();
-                var generatedBytes = (generatedTree.Tree.GetText(cancellationToken).Encoding ?? Encoding.UTF8).GetByteCount(generatedTree.Text);
-                budget.ObserveGeneratedSourceBytes(generatedBytes);
+                var materialized = MaterializeGeneratedTree(generatedTree.Tree, cancellationToken);
+                if (materialized is null)
+                {
+                    continue;
+                }
+
                 Scan(
-                    generatedTree.Tree.GetRoot(cancellationToken),
-                    generatorRun.OutputCompilation.GetSemanticModel(generatedTree.Tree),
-                    generatedTree.Tree.FilePath,
+                    materialized.Tree.GetRoot(cancellationToken),
+                    generatorRun.OutputCompilation.GetSemanticModel(materialized.Tree),
+                    materialized.Tree.FilePath,
                     false,
-                    generatedTree.Tree,
-                    generatedTree.LogicalPath,
-                    generatedTree.Text,
+                    materialized.Tree,
+                    materialized.LogicalPath,
+                    materialized.Text,
                     generatorRun.GeneratorVersion,
                     true);
             }
@@ -424,9 +519,15 @@ internal sealed class LogSchemaExtractor
                 }
             }
 
-            foreach (var generatedTree in compiledGeneratedTrees.OrderBy(tree => tree.LogicalPath, StringComparer.Ordinal))
+            foreach (var tree in compiledGeneratedTrees.OrderBy(tree => tree.FilePath, StringComparer.Ordinal))
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                var generatedTree = MaterializeGeneratedTree(tree, cancellationToken);
+                if (generatedTree is null)
+                {
+                    continue;
+                }
+
                 Scan(
                     generatedTree.Tree.GetRoot(cancellationToken),
                     compilation.GetSemanticModel(generatedTree.Tree),
@@ -617,6 +718,34 @@ internal sealed class LogSchemaExtractor
             }
         }
 
+        private GeneratedSyntaxTree? MaterializeGeneratedTree(SyntaxTree tree, CancellationToken cancellationToken)
+        {
+            var path = tree.FilePath;
+            var text = tree.GetText(cancellationToken);
+            if (!string.IsNullOrWhiteSpace(path) && generatedTextByPath.TryGetValue(path, out var previousText) && text.ContentEquals(previousText))
+            {
+                return null;
+            }
+
+            budget.ObserveGeneratedSyntaxTree();
+            if (text.Length > ProjectAnalysisLimits.MaxGeneratedSourceBytesPerTree)
+            {
+                throw new ProjectAnalysisException(ProjectAnalysisLimits.GeneratedTreeBytesMessage(text.Length));
+            }
+
+            budget.EnsureGeneratedSourceBytesWithinBudget(text);
+
+            var generatedText = text.ToString();
+            budget.ObserveGeneratedSourceBytes((text.Encoding ?? Encoding.UTF8).GetByteCount(generatedText));
+            var logicalPath = SourceProvenance.NormalizeGeneratedPath(path, generatedText);
+            if (!string.IsNullOrWhiteSpace(path))
+            {
+                generatedTextByPath[path] = text;
+            }
+
+            return new GeneratedSyntaxTree(tree, logicalPath, generatedText);
+        }
+
         private void AddUnsupported(SourceLocation source, MethodDeclarationSyntax syntax, string declarationKey, string reason)
         {
             AddUnsupported(source, NormalizeDeclaration(syntax.ToString()), declarationKey, reason);
@@ -669,12 +798,7 @@ internal sealed class LogSchemaExtractor
             driver = driver.RunGeneratorsAndUpdateCompilation(inputCompilation, out var outputCompilation, out _, cancellationToken);
             var runResult = driver.GetRunResult();
             var generatedTrees = runResult.GeneratedTrees
-                .Select(tree =>
-                {
-                    var text = tree.GetText(cancellationToken).ToString();
-                    var logicalPath = SourceProvenance.NormalizeGeneratedPath(tree.FilePath, text);
-                    return new GeneratedSyntaxTree(tree, logicalPath, text);
-                })
+                .Select(tree => new GeneratedSyntaxTree(tree))
                 .ToArray();
             var resolvedAbstractionsVersion = ResolveAbstractionsVersion();
             return new GeneratorRunResult(
@@ -793,7 +917,7 @@ internal sealed class LogSchemaExtractor
             }
         }
 
-        private sealed record GeneratedSyntaxTree(SyntaxTree Tree, string LogicalPath, string Text);
+        private sealed record GeneratedSyntaxTree(SyntaxTree Tree, string? LogicalPath = null, string? Text = null);
         private sealed record SourceMethod(MethodDeclarationSyntax Syntax, IMethodSymbol Symbol, SourceLocation Source);
         private sealed record SourceCandidate(SourceLocation Source, string Declaration, EventContract Contract);
         private sealed record GeneratorRunResult(
@@ -863,6 +987,16 @@ internal sealed class LogSchemaExtractor
                 return false;
             }
         }
+
+        foreach (var parameter in method.Parameters)
+        {
+            var declaredType = parameter.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat).Replace("global::", string.Empty, StringComparison.Ordinal);
+            if (!ManifestJson.TryGetRequiredParameterForm(declaredType, out _))
+            {
+                reason = $"parameter '{parameter.Name}' uses a non-canonical declared type representation; the declaration is unsupported";
+                return false;
+            }
+        }
         if (!TryReadAttribute(attribute, method, out var eventId, out var eventName, out var level, out var message, out reason))
         {
             return false;
@@ -889,11 +1023,19 @@ internal sealed class LogSchemaExtractor
             return false;
         }
 
+        var codeNames = syntax.ParameterList.Parameters.Select(parameter => parameter.Identifier.Text).ToArray();
+        if (codeNames.Length != method.Parameters.Length)
+        {
+            reason = "source parameter syntax could not be paired with its semantic parameter symbols";
+            return false;
+        }
+
         var structuredState = method.Parameters
-            .Where(parameter => semantics.IsStructuredState(parameter.Name, dynamicLevel, placeholders))
-            .Select(parameter =>
+            .Select((parameter, index) => (parameter, index))
+            .Where(item => semantics.IsStructuredState(item.parameter.Name, dynamicLevel, placeholders))
+            .Select(item =>
             {
-                return new StructuredStateProperty(parameter.Name, LoggerMessageGeneratorSemantics.EmittedName(parameter.Name, placeholders));
+                return new StructuredStateProperty(item.parameter.Name, LoggerMessageGeneratorSemantics.EmittedName(item.parameter.Name, codeNames[item.index], placeholders));
             })
             .ToArray();
 
@@ -912,11 +1054,12 @@ internal sealed class LogSchemaExtractor
             placeholders,
             method.Parameters.Select(parameter => GetParameterForm(parameter.Type)).ToArray(),
             source,
-            method.Parameters.Select(parameter => new ParameterContract(
+            method.Parameters.Select((parameter, index) => new ParameterContract(
                 parameter.Name,
                 parameter.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat).Replace("global::", string.Empty, StringComparison.Ordinal),
                 parameter.RefKind.ToString(),
-                semantics.Parameter(parameter.Name).Role)).ToArray(),
+                semantics.Parameter(parameter.Name).Role,
+                codeNames[index])).ToArray(),
             structuredState,
             semantics.LoggerParameter,
             semantics.ExceptionParameter,
@@ -1072,7 +1215,7 @@ internal sealed class LogSchemaExtractor
         return noBracesFound;
     }
 
-    private static string GetDeclarationKey(IMethodSymbol method) => method.ContainingType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) + "." + method.Name + "`" + method.Arity.ToString(CultureInfo.InvariantCulture) + "(" + string.Join(",", method.Parameters.Select(parameter => $"{parameter.RefKind}:{GetParameterForm(parameter.Type)}:{parameter.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)}")) + ")";
+    private static string GetDeclarationKey(IMethodSymbol method) => method.ContainingType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) + "." + method.Name + "`" + method.Arity.ToString(CultureInfo.InvariantCulture) + "(" + string.Join(",", method.Parameters.Select(parameter => $"{parameter.RefKind}:{GetParameterFormForIdentity(parameter.Type)}:{parameter.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)}")) + ")";
 
     private static string EnumName(TypedConstant argument) => Convert.ToInt32(argument.Value, CultureInfo.InvariantCulture) switch
     {
@@ -1099,6 +1242,12 @@ internal sealed class LogSchemaExtractor
     }
 
     private static string GetParameterForm(ITypeSymbol type) => ManifestJson.GetRequiredParameterForm(type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat).Replace("global::", string.Empty, StringComparison.Ordinal));
+
+    private static string GetParameterFormForIdentity(ITypeSymbol type)
+    {
+        var declaredType = type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat).Replace("global::", string.Empty, StringComparison.Ordinal);
+        return ManifestJson.TryGetRequiredParameterForm(declaredType, out var form) ? form : "None";
+    }
 
     private static string NormalizeDeclaration(string declaration) => declaration.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n');
 }

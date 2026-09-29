@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Xml;
 
 namespace KeelMatrix.LogSchema;
 
@@ -56,6 +57,14 @@ internal sealed class CommandRunner
         catch (ManifestWriteException exception)
         {
             return await WriteErrorAsync(parsed, exception.Message, 3, stdout, stderr, analysisError: true);
+        }
+        catch (ManifestValidationException)
+        {
+            return await WriteErrorAsync(parsed, "The analyzed declaration could not be represented by the supported manifest schema.", 3, stdout, stderr, analysisError: true);
+        }
+        catch (XmlException)
+        {
+            return await WriteErrorAsync(parsed, "The project or solution contains malformed or prohibited XML.", 3, stdout, stderr, analysisError: true);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException or System.Security.SecurityException)
         {
@@ -298,7 +307,7 @@ Options:
                            Set the exit-code gate; default is breaking.
   --accept <code>          Explicitly accept a diagnostic code without rewriting a baseline.
   --no-telemetry           Reserved v1 opt-out; v1 contains no telemetry client.
-  --tfm <target-framework> Select a target framework for multi-targeted projects.
+  --tfm <target-framework> Select a declared target framework; omitted is valid only when unambiguous.
   --help                   Show this help.
 
 Exit codes:
@@ -311,19 +320,24 @@ Analysis budget:
   Project inputs are bounded to 64 C# projects, 512 source documents per project,
   4,096 source documents total, 1 MiB per source document, 16 MiB source per
   project, 64 MiB source total, and 16 MiB per .sln/.slnx preflight file. Each
-  compilation is bounded to 8,192 syntax trees, 4,096 generated trees,
+  compilation is bounded to 8,192 syntax trees, 4,096 generated trees per project,
   4 MiB generated text per tree, 64 MiB generated text total, and 4,096 discovered
-  declarations, events, or unsupported declarations. Exceeding any ceiling returns
-  exit 3 as Project analysis resource limit exceeded. MSBuild evaluation remains a
-  local trust boundary and is not sandboxed or absolutely bounded by these checks.
+  declarations, events, or unsupported declarations. Per-project counters reset at
+  project boundaries; aggregate byte and declaration counters remain shared. The
+  tool checks generated-text upper bounds before owned conversion and does not
+  double-charge identical generator/compiler observations. Exceeding any ceiling
+  returns exit 3 as Project analysis resource limit exceeded. MSBuild evaluation
+  remains a local trust boundary and is not sandboxed or absolutely bounded by
+  these checks.
 
 Compatibility summary:
   BREAKING EventId/EventName changes, structured-state removal/rename/order changes, and parameter-role changes (default gate).
   WARNING  Fixed/dynamic or named LogLevel changes (use --severity warning to gate).
   INFO     Event/structured-state additions and message-template changes with unchanged structured state.
   A placeholder is one occurrence in the message template. Structured state is the unique, method-ordered
-  set of emitted properties produced by the generator; a matched placeholder supplies its emitted casing,
-  otherwise the ordinary parameter name is emitted. Parameter roles record the first logger, exception, and LogLevel candidates independently; later candidates are state parameters.
+  set of emitted properties produced by the generator; a matched placeholder preserves its raw emitted
+  spelling, including @, otherwise the source parameter's code spelling is emitted. Parameter roles record
+  the first logger, exception, and LogLevel candidates independently; later candidates are state parameters.
   A dynamic first LogLevel supplies the runtime level and is excluded from state, while a fixed-level first LogLevel is emitted as state.
   Fixed and dynamic level sources are distinct.
   Capture resolves the actual Microsoft.Extensions.Logging.Abstractions reference and pinned generator; only
@@ -333,7 +347,8 @@ Compatibility summary:
   symbol with the pinned tool/version pair.
   Structured identity fields use exact ordinal comparison; case-only emitted-property renames are KMLOG102.
   Declared type text must be canonical; forms are classified structurally: top-level ILogger arity 0/1,
-  exact top-level LogLevel or Exception, else None. Non-canonical text and form contradictions return 3
+  exact top-level LogLevel or Exception, else None. Duplicate decoded manifest properties, known built-in
+  type/role contradictions, and non-canonical numeric levels are rejected. Non-canonical text and form contradictions return 3
   with incomplete coverage and no findings. Raw type prefixes and suffixes are never trusted.
   Manifest reads cross-validate fixed/dynamic level fields and recompute the exact placeholder occurrence
   sequence from message. Every comparable v1 manifest requires a canonical SHA-256 integrity value;

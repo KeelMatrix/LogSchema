@@ -208,7 +208,9 @@ internal static class LoggerMessageGeneratorSemantics
     }
 
     internal static bool IsFixedLevel(string? level) =>
-        level is "Trace" or "Debug" or "Information" or "Warning" or "Error" or "Critical" or "None" || int.TryParse(level, out _);
+        level is "Trace" or "Debug" or "Information" or "Warning" or "Error" or "Critical" or "None" ||
+        int.TryParse(level, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var numeric) &&
+        string.Equals(level, numeric.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal);
 
     internal static bool IsSupportedGeneratorVersion(IReadOnlySet<string> versions) =>
         versions.Count == 1 && (versions.Contains(SupportedGeneratorAssemblyVersion) || versions.Contains(CurrentStableGeneratorAssemblyVersion));
@@ -316,8 +318,11 @@ internal static class LoggerMessageGeneratorSemantics
         string.Equals(parameterName, placeholderName, StringComparison.OrdinalIgnoreCase) ||
         string.Equals("@" + parameterName, placeholderName, StringComparison.OrdinalIgnoreCase);
 
+    internal static string EmittedName(string parameterName, string codeName, IReadOnlyList<Placeholder> placeholders) =>
+        placeholders.FirstOrDefault(placeholder => PlaceholderMatches(parameterName, placeholder.Name))?.Name ?? codeName;
+
     internal static string EmittedName(string parameterName, IReadOnlyList<Placeholder> placeholders) =>
-        placeholders.FirstOrDefault(placeholder => PlaceholderMatches(parameterName, placeholder.Name))?.Name.TrimStart('@') ?? parameterName;
+        EmittedName(parameterName, parameterName, placeholders);
 
     private static bool IsBaseOrIdentity(ITypeSymbol source, ITypeSymbol destination, Compilation compilation)
     {
