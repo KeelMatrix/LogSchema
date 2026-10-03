@@ -210,7 +210,7 @@ public sealed class ManifestJsonTests
                 _ = await ManifestJson.ReadAsync(namedPath, CancellationToken.None);
             }
 
-            foreach (var level in new[] { "0", "1", "2", "3", "4", "5", "6", "+2", "02", " 2 ", "information", "INFORMATION" })
+            foreach (var level in new[] { "-1", "0", "1", "2", "3", "4", "5", "6", "+2", "02", " 2 ", "+7", "07", "+0", "-01", "information", "INFORMATION" })
             {
                 var alias = JsonNode.Parse(original.ToJsonString())!;
                 alias["events"]![0]!["level"] = level;

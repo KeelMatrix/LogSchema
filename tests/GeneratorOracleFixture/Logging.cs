@@ -25,10 +25,10 @@ public static partial class Logging
     [LoggerMessage(EventId = 7, Message = "Dynamic {value}")]
     public static partial void Dynamic(ILogger logger, LogLevel level, int value);
 
-    [LoggerMessage(EventId = 8, Level = LogLevel.Information, Message = "Six {one} {two} {three} {four} {five} {six}")]
+    [LoggerMessage(EventId = 8, Level = LogLevel.Information, Message = "Six {one} {two} {three} {four} {five} {@six}")]
     public static partial void Six(ILogger logger, int one, int two, int three, int four, int five, int six);
 
-    [LoggerMessage(EventId = 9, Level = LogLevel.Information, Message = "Seven {one} {two} {three} {four} {five} {six} {seven}")]
+    [LoggerMessage(EventId = 9, Level = LogLevel.Information, Message = "Seven {one} {two} {three} {four} {five} {six} {@seven}")]
     public static partial void Seven(ILogger logger, int one, int two, int three, int four, int five, int six, int seven);
 
     [LoggerMessage(EventId = 10, Level = LogLevel.Information, Message = "Mixed {second} {first} {first}")]

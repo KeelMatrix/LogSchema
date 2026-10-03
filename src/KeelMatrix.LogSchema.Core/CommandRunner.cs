@@ -335,10 +335,10 @@ Compatibility summary:
   WARNING  Fixed/dynamic or named LogLevel changes (use --severity warning to gate).
   INFO     Event/structured-state additions and message-template changes with unchanged structured state.
   A placeholder is one occurrence in the message template. Structured state is the unique, method-ordered
-  set of emitted properties produced by the generator. When every structured parameter has one occurrence,
-  the LoggerMessage.Define path preserves the matched placeholder's raw emitted spelling, including @;
-  when occurrence count differs from structured-parameter count, the generated-state path starts from the
-  source code name and only adopts a case-insensitive exact code-name placeholder match. Parameter roles record
+  set of emitted properties produced by the generator. LoggerMessage.Define is selected when occurrence count
+  equals structured-parameter count and the count is at most six; its callback preserves the matched placeholder's
+  raw emitted spelling, including @. Otherwise, generated state starts from the source code name and only adopts
+  a case-insensitive exact code-name placeholder match. Parameter roles record
   the first logger, exception, and LogLevel candidates independently; later candidates are state parameters.
   A dynamic first LogLevel supplies the runtime level and is excluded from state, while a fixed-level first LogLevel is emitted as state.
   Fixed and dynamic level sources are distinct.

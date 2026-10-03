@@ -32,6 +32,7 @@ public sealed class GeneratorDifferentialOracleTests
         await using var tool = await InstalledToolHarness.CreateAsync();
         foreach (var fixtureName in new[] { "GeneratorOracleFixture", "GeneratorOracleStableFixture" })
         {
+            Action<ILogger> invoke = fixtureName == "GeneratorOracleFixture" ? InvokePrimary : InvokeStable;
             var root = Directory.CreateTempSubdirectory("logschema-generator-oracle-");
             var sourceProject = FindRepositoryFile("tests", fixtureName);
             var copiedProject = Path.Combine(root.FullName, fixtureName);
@@ -47,6 +48,9 @@ public sealed class GeneratorDifferentialOracleTests
                 await CaptureAsync(tool, projectPath, baselinePath);
                 await AssertClean(tool, projectPath, baselinePath);
                 Assert.Equal("@value", await ReadEmittedNameAsync(baselinePath, "EscapedPlaceholder"));
+                var baselineLogger = new CapturingLogger();
+                invoke(baselineLogger);
+                await AssertManifestMatchesState(baselinePath, "EscapedPlaceholder", Assert.Single(baselineLogger.Events, item => item.Name == "EscapedPlaceholder").Keys);
 
                 var original = await File.ReadAllTextAsync(sourcePath);
                 var repeated = original.Replace("Escaped {@value}", "Escaped {@value} {@value}", StringComparison.Ordinal);
@@ -54,6 +58,8 @@ public sealed class GeneratorDifferentialOracleTests
                 await File.WriteAllTextAsync(sourcePath, repeated);
                 await CaptureAsync(tool, projectPath, mutatedPath);
                 Assert.Equal("value", await ReadEmittedNameAsync(mutatedPath, "EscapedPlaceholder"));
+                var mutatedKeys = await InvokeBuiltFixtureAsync(projectPath, fixtureName);
+                await AssertManifestMatchesState(mutatedPath, "EscapedPlaceholder", mutatedKeys);
                 await AssertBreakingStateChange(tool, projectPath, baselinePath, mutatedPath, "EscapedPlaceholder");
 
                 await File.WriteAllTextAsync(sourcePath, original);
@@ -92,7 +98,7 @@ public sealed class GeneratorDifferentialOracleTests
 
             Assert.Contains("@value", actual["EscapedPlaceholder"]);
             Assert.Contains("@value", actual["EscapedParameter"]);
-            Assert.Equal(["one", "two", "three", "four", "five", "six", "{OriginalFormat}"], actual["Six"]);
+            Assert.Equal(["one", "two", "three", "four", "five", "@six", "{OriginalFormat}"], actual["Six"]);
             Assert.Equal(["one", "two", "three", "four", "five", "six", "seven", "{OriginalFormat}"], actual["Seven"]);
             Assert.Equal(["first", "second", "{OriginalFormat}"], actual["Mixed"]);
         }
@@ -145,6 +151,64 @@ public sealed class GeneratorDifferentialOracleTests
         return Assert.Single(manifest.Events, @event => string.Equals(@event.Method, method, StringComparison.Ordinal)).StructuredState.Single().EmittedName;
     }
 
+    private static async Task AssertManifestMatchesState(string manifestPath, string method, IReadOnlyList<string> actualKeys)
+    {
+        var manifest = await ManifestJson.ReadAsync(manifestPath, CancellationToken.None);
+        var expectedKeys = Assert.Single(manifest.Events, @event => string.Equals(@event.Method, method, StringComparison.Ordinal))
+            .StructuredState.Select(property => property.EmittedName).Append("{OriginalFormat}").ToArray();
+        Assert.Equal(expectedKeys, actualKeys);
+    }
+
+    private static async Task<IReadOnlyList<string>> InvokeBuiltFixtureAsync(string projectPath, string fixtureName)
+    {
+        var projectDirectory = Path.GetDirectoryName(projectPath)!;
+        var project = await File.ReadAllTextAsync(projectPath);
+        const string targetFramework = "<TargetFramework>net8.0</TargetFramework>";
+        Assert.Contains(targetFramework, project, StringComparison.Ordinal);
+        await File.WriteAllTextAsync(projectPath, project.Replace(targetFramework, targetFramework + "<OutputType>Exe</OutputType>", StringComparison.Ordinal));
+
+        var fixtureNamespace = fixtureName == "GeneratorOracleFixture" ? "GeneratorOracleFixture" : "GeneratorOracleStableFixture";
+        var runner = $$"""
+            using System.Collections;
+            using System.Text.Json;
+            using Microsoft.Extensions.Logging;
+            using {{fixtureNamespace}};
+
+            internal static class RuntimeStateCapture
+            {
+                private static void Main()
+                {
+                    var logger = new CapturingLogger();
+                    Logging.EscapedPlaceholder(logger, 2);
+                    Console.WriteLine(JsonSerializer.Serialize(logger.Keys));
+                }
+
+                private sealed class CapturingLogger : ILogger
+                {
+                    internal IReadOnlyList<string> Keys { get; private set; } = [];
+                    public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+                    public bool IsEnabled(LogLevel logLevel) => true;
+
+                    public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+                    {
+                        Keys = state is IEnumerable enumerable
+                            ? enumerable.Cast<object>().Select(value => value is KeyValuePair<string, object?> pair ? pair.Key : value.ToString() ?? string.Empty).ToArray()
+                            : [];
+                    }
+                }
+            }
+            """;
+        await File.WriteAllTextAsync(Path.Combine(projectDirectory, "RuntimeStateCapture.cs"), runner);
+
+        var build = await InstalledToolHarness.RunProcessAsync("dotnet", ["build", projectPath, "-c", "Release", "--no-restore", "-p:UseAppHost=false", "--nologo"]);
+        Assert.True(build.ExitCode == 0, $"mutated generator fixture build failed. stdout:\n{build.StandardOutput}\nstderr:\n{build.StandardError}");
+        var assemblyPath = Path.Combine(projectDirectory, "bin", "Release", "net8.0", fixtureName + ".dll");
+        var run = await InstalledToolHarness.RunProcessAsync("dotnet", [assemblyPath]);
+        Assert.True(run.ExitCode == 0, $"mutated generated logger invocation failed. stdout:\n{run.StandardOutput}\nstderr:\n{run.StandardError}");
+        Assert.Empty(run.StandardError);
+        return JsonSerializer.Deserialize<string[]>(run.StandardOutput) ?? throw new InvalidOperationException("The generated logger did not return structured-state keys.");
+    }
+
     private static async Task RestoreAsync(string projectPath)
     {
         using var process = Process.Start(new ProcessStartInfo
@@ -154,7 +218,8 @@ public sealed class GeneratorDifferentialOracleTests
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
-            CreateNoWindow = true
+            CreateNoWindow = true,
+            WorkingDirectory = Path.GetDirectoryName(FindRepositoryFile("LogSchema.slnx"))!
         });
         Assert.NotNull(process);
         await process!.WaitForExitAsync();
@@ -231,7 +296,7 @@ public sealed class GeneratorDifferentialOracleTests
             return ValueTask.CompletedTask;
         }
 
-        private static async Task<InstalledToolResult> RunProcessAsync(string fileName, IReadOnlyList<string> arguments)
+        internal static async Task<InstalledToolResult> RunProcessAsync(string fileName, IReadOnlyList<string> arguments)
         {
             using var process = new Process
             {
@@ -241,7 +306,8 @@ public sealed class GeneratorDifferentialOracleTests
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
                     UseShellExecute = false,
-                    CreateNoWindow = true
+                    CreateNoWindow = true,
+                    WorkingDirectory = Path.GetDirectoryName(FindRepositoryFile("LogSchema.slnx"))!
                 }
             };
             foreach (var argument in arguments)

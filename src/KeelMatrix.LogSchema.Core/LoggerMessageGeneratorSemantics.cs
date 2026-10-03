@@ -39,6 +39,7 @@ internal static class LoggerMessageGeneratorSemantics
     internal const string GeneratorVersionIssueCode = "KMLOGP009";
     internal const string MixedGeneratorVersionIssueCode = "KMLOGP010";
     internal const string GeneratorDiagnosticIssueCode = "KMLOGP011";
+    private const int LoggerMessageDefineMaxStateParameters = 6;
 
     private const string LoggerMetadataName = "Microsoft.Extensions.Logging.ILogger";
     private const string LogLevelMetadataName = "Microsoft.Extensions.Logging.LogLevel";
@@ -210,7 +211,7 @@ internal static class LoggerMessageGeneratorSemantics
     internal static bool IsFixedLevel(string? level) =>
         level is "Trace" or "Debug" or "Information" or "Warning" or "Error" or "Critical" or "None" ||
         int.TryParse(level, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var numeric) &&
-        numeric is < 0 or > 6 &&
+        numeric is < -1 or > 6 &&
         string.Equals(level, numeric.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal);
 
     internal static bool IsSupportedGeneratorVersion(IReadOnlySet<string> versions) =>
@@ -321,13 +322,14 @@ internal static class LoggerMessageGeneratorSemantics
 
     internal static string EmittedName(string parameterName, string codeName, IReadOnlyList<Placeholder> placeholders, int structuredParameterCount)
     {
-        // LoggerMessage uses the Define callback when every structured parameter
-        // has one template occurrence. That callback retains the raw occurrence
-        // spelling. When the counts differ, the generated-state path starts from
-        // the source code name and only adopts a template spelling that exactly
-        // matches that code name (case-insensitively). In particular, a leading
-        // structured-state '@' is not an exact match for an ordinary code name.
-        if (placeholders.Count == structuredParameterCount)
+        // The generator uses LoggerMessage.Define only when every structured
+        // parameter has one template occurrence and the Define overload supports
+        // the structured parameter count (at most six). That callback retains
+        // the raw occurrence spelling. Otherwise the generated-state path starts
+        // from the source code name and only adopts a case-insensitive exact
+        // code-name match. In particular, a leading structured-state '@' is not
+        // an exact match for an ordinary code name on that path.
+        if (structuredParameterCount <= LoggerMessageDefineMaxStateParameters && placeholders.Count == structuredParameterCount)
         {
             return placeholders.FirstOrDefault(placeholder => PlaceholderMatches(parameterName, placeholder.Name))?.Name ?? codeName;
         }
