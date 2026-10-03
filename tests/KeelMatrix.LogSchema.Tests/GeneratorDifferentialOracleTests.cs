@@ -165,6 +165,7 @@ public sealed class GeneratorDifferentialOracleTests
 
     private sealed class InstalledToolHarness : IAsyncDisposable
     {
+        private static readonly SemaphoreSlim PackGate = new(1, 1);
         private readonly string root;
         private readonly string commandPath;
 
@@ -183,8 +184,18 @@ public sealed class GeneratorDifferentialOracleTests
             Directory.CreateDirectory(toolPath);
 
             var projectPath = FindRepositoryFile("src", "KeelMatrix.LogSchema", "KeelMatrix.LogSchema.csproj");
-            var pack = await RunProcessAsync("dotnet", ["pack", projectPath, "-c", "Release", "--no-restore", "--nologo", "-o", feed]);
-            Assert.Equal(0, pack.ExitCode);
+            InstalledToolResult pack;
+            await PackGate.WaitAsync();
+            try
+            {
+                pack = await RunProcessAsync("dotnet", ["pack", projectPath, "-c", "Release", "--no-restore", "--nologo", "-o", feed]);
+            }
+            finally
+            {
+                PackGate.Release();
+            }
+
+            Assert.True(pack.ExitCode == 0, $"installed-tool package creation failed. stdout:\n{pack.StandardOutput}\nstderr:\n{pack.StandardError}");
             Assert.Empty(pack.StandardError);
 
             var packagePath = Assert.Single(Directory.GetFiles(feed, "KeelMatrix.LogSchema.*.nupkg"));
