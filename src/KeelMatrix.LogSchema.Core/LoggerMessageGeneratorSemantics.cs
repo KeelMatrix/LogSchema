@@ -211,7 +211,7 @@ internal static class LoggerMessageGeneratorSemantics
     internal static bool IsFixedLevel(string? level) =>
         level is "Trace" or "Debug" or "Information" or "Warning" or "Error" or "Critical" or "None" ||
         int.TryParse(level, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var numeric) &&
-        numeric is < -1 or > 6 &&
+        numeric is < 0 or > 6 &&
         string.Equals(level, numeric.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal);
 
     internal static bool IsSupportedGeneratorVersion(IReadOnlySet<string> versions) =>
