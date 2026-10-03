@@ -188,7 +188,7 @@ public sealed class GeneratorDifferentialOracleTests
             await PackGate.WaitAsync();
             try
             {
-                pack = await RunProcessAsync("dotnet", ["pack", projectPath, "-c", "Release", "--no-restore", "--nologo", "-o", feed]);
+                pack = await RunProcessAsync("dotnet", ["pack", projectPath, "-c", "Release", "--no-build", "--no-restore", "--nologo", "-o", feed]);
             }
             finally
             {
