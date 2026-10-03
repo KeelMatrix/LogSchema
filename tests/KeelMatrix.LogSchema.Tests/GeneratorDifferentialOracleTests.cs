@@ -15,49 +15,66 @@ public sealed class GeneratorDifferentialOracleTests
     [Fact]
     public async Task InstalledToolMatchesRealGeneratorStateForBothSupportedPairs()
     {
+        await using var tool = await InstalledToolHarness.CreateAsync();
         await AssertFixtureMatchesGenerator(
+            tool,
             FindRepositoryFile("tests", "GeneratorOracleFixture", "GeneratorOracleFixture.csproj"),
             InvokePrimary);
         await AssertFixtureMatchesGenerator(
+            tool,
             FindRepositoryFile("tests", "GeneratorOracleStableFixture", "GeneratorOracleStableFixture.csproj"),
             InvokeStable);
     }
 
     [Fact]
-    public async Task StateKeyMutationsAreBreakingEvenWhenTemplateTextAlsoChanges()
+    public async Task RepeatedStructuredPrefixMutationsAreBreakingInBothDirectionsForBothSupportedPairs()
     {
-        var root = Directory.CreateTempSubdirectory("logschema-generator-oracle-");
-        var sourceProject = FindRepositoryFile("tests", "GeneratorOracleFixture");
-        var copiedProject = Path.Combine(root.FullName, "GeneratorOracleFixture");
-        CopyDirectory(sourceProject, copiedProject);
-        var projectPath = Path.Combine(copiedProject, "GeneratorOracleFixture.csproj");
-        var sourcePath = Path.Combine(copiedProject, "Logging.cs");
-        var baselinePath = Path.Combine(root.FullName, "baseline.json");
-        try
+        await using var tool = await InstalledToolHarness.CreateAsync();
+        foreach (var fixtureName in new[] { "GeneratorOracleFixture", "GeneratorOracleStableFixture" })
         {
-            await RestoreAsync(projectPath);
-            await CaptureAsync(projectPath, baselinePath);
-            var original = await File.ReadAllTextAsync(sourcePath);
+            var root = Directory.CreateTempSubdirectory("logschema-generator-oracle-");
+            var sourceProject = FindRepositoryFile("tests", fixtureName);
+            var copiedProject = Path.Combine(root.FullName, fixtureName);
+            CopyDirectory(sourceProject, copiedProject);
+            var projectPath = Path.Combine(copiedProject, fixtureName + ".csproj");
+            var sourcePath = Path.Combine(copiedProject, "Logging.cs");
+            var baselinePath = Path.Combine(root.FullName, "baseline.json");
+            var mutatedPath = Path.Combine(root.FullName, "mutated.json");
+            var reversePath = Path.Combine(root.FullName, "reverse.json");
+            try
+            {
+                await RestoreAsync(projectPath);
+                await CaptureAsync(tool, projectPath, baselinePath);
+                await AssertClean(tool, projectPath, baselinePath);
+                Assert.Equal("@value", await ReadEmittedNameAsync(baselinePath, "EscapedPlaceholder"));
 
-            await File.WriteAllTextAsync(sourcePath, original.Replace("Escaped {@value}", "Escaped {value}", StringComparison.Ordinal));
-            await AssertBreakingStateChange(projectPath, baselinePath, "EscapedPlaceholder");
+                var original = await File.ReadAllTextAsync(sourcePath);
+                var repeated = original.Replace("Escaped {@value}", "Escaped {@value} {@value}", StringComparison.Ordinal);
+                Assert.NotEqual(original, repeated);
+                await File.WriteAllTextAsync(sourcePath, repeated);
+                await CaptureAsync(tool, projectPath, mutatedPath);
+                Assert.Equal("value", await ReadEmittedNameAsync(mutatedPath, "EscapedPlaceholder"));
+                await AssertBreakingStateChange(tool, projectPath, baselinePath, mutatedPath, "EscapedPlaceholder");
 
-            await File.WriteAllTextAsync(sourcePath, original.Replace("int @value", "int value", StringComparison.Ordinal));
-            await AssertBreakingStateChange(projectPath, baselinePath, "EscapedParameter");
-        }
-        finally
-        {
-            root.Delete(true);
+                await File.WriteAllTextAsync(sourcePath, original);
+                await CaptureAsync(tool, projectPath, reversePath);
+                await AssertBreakingStateChange(tool, projectPath, mutatedPath, reversePath, "EscapedPlaceholder");
+                await AssertClean(tool, projectPath, baselinePath);
+            }
+            finally
+            {
+                root.Delete(true);
+            }
         }
     }
 
-    private static async Task AssertFixtureMatchesGenerator(string projectPath, Action<ILogger> invoke)
+    private static async Task AssertFixtureMatchesGenerator(InstalledToolHarness tool, string projectPath, Action<ILogger> invoke)
     {
         var root = Directory.CreateTempSubdirectory("logschema-generator-oracle-manifest-");
         var manifestPath = Path.Combine(root.FullName, "manifest.json");
         try
         {
-            await CaptureAsync(projectPath, manifestPath);
+            await CaptureAsync(tool, projectPath, manifestPath);
             var manifest = await ManifestJson.ReadAsync(manifestPath, CancellationToken.None);
             var logger = new CapturingLogger();
             invoke(logger);
@@ -77,6 +94,7 @@ public sealed class GeneratorDifferentialOracleTests
             Assert.Contains("@value", actual["EscapedParameter"]);
             Assert.Equal(["one", "two", "three", "four", "five", "six", "{OriginalFormat}"], actual["Six"]);
             Assert.Equal(["one", "two", "three", "four", "five", "six", "seven", "{OriginalFormat}"], actual["Seven"]);
+            Assert.Equal(["first", "second", "{OriginalFormat}"], actual["Mixed"]);
         }
         finally
         {
@@ -84,27 +102,47 @@ public sealed class GeneratorDifferentialOracleTests
         }
     }
 
-    private static async Task AssertBreakingStateChange(string projectPath, string baselinePath, string method)
+    private static async Task AssertBreakingStateChange(InstalledToolHarness tool, string projectPath, string baselinePath, string currentPath, string method)
     {
-        using var output = new StringWriter();
-        using var errors = new StringWriter();
-        var exitCode = await CommandRunner.RunAsync(["check", projectPath, "--baseline", baselinePath, "--format", "json", "--severity", "all", "--no-telemetry"], output, errors);
-        Assert.Equal(1, exitCode);
-        Assert.Empty(errors.ToString());
-        using var envelope = JsonDocument.Parse(output.ToString());
+        var check = await tool.RunAsync("check", projectPath, "--baseline", baselinePath, "--format", "json", "--severity", "all", "--accept", "KMLOG301", "--no-telemetry");
+        AssertBreakingEnvelope(check, method);
+
+        var diff = await tool.RunAsync("diff", baselinePath, currentPath, "--format", "json", "--severity", "all", "--accept", "KMLOG301", "--no-telemetry");
+        AssertBreakingEnvelope(diff, method);
+    }
+
+    private static void AssertBreakingEnvelope(InstalledToolResult result, string method)
+    {
+        Assert.Equal(1, result.ExitCode);
+        Assert.Empty(result.StandardError);
+        using var envelope = JsonDocument.Parse(result.StandardOutput);
         var finding = envelope.RootElement.GetProperty("findings").EnumerateArray().Single(item => item.GetProperty("eventName").GetString() == method);
         Assert.Equal("KMLOG102", finding.GetProperty("code").GetString());
         Assert.False(envelope.RootElement.GetProperty("analysisErrors").EnumerateArray().Any());
         Assert.True(envelope.RootElement.GetProperty("coverageComplete").GetBoolean());
     }
 
-    private static async Task CaptureAsync(string projectPath, string manifestPath)
+    private static async Task AssertClean(InstalledToolHarness tool, string projectPath, string baselinePath)
     {
-        using var output = new StringWriter();
-        using var errors = new StringWriter();
-        var exitCode = await CommandRunner.RunAsync(["capture", projectPath, "--output", manifestPath, "--no-telemetry"], output, errors);
-        Assert.Equal(0, exitCode);
-        Assert.Empty(errors.ToString());
+        var check = await tool.RunAsync("check", projectPath, "--baseline", baselinePath, "--format", "json", "--severity", "all", "--accept", "KMLOG301", "--no-telemetry");
+        Assert.Equal(0, check.ExitCode);
+        Assert.Empty(check.StandardError);
+        var diff = await tool.RunAsync("diff", baselinePath, baselinePath, "--format", "json", "--severity", "all", "--accept", "KMLOG301", "--no-telemetry");
+        Assert.Equal(0, diff.ExitCode);
+        Assert.Empty(diff.StandardError);
+    }
+
+    private static async Task CaptureAsync(InstalledToolHarness tool, string projectPath, string manifestPath)
+    {
+        var result = await tool.RunAsync("capture", projectPath, "--output", manifestPath, "--no-telemetry");
+        Assert.Equal(0, result.ExitCode);
+        Assert.Empty(result.StandardError);
+    }
+
+    private static async Task<string> ReadEmittedNameAsync(string manifestPath, string method)
+    {
+        var manifest = await ManifestJson.ReadAsync(manifestPath, CancellationToken.None);
+        return Assert.Single(manifest.Events, @event => string.Equals(@event.Method, method, StringComparison.Ordinal)).StructuredState.Single().EmittedName;
     }
 
     private static async Task RestoreAsync(string projectPath)
@@ -123,6 +161,91 @@ public sealed class GeneratorDifferentialOracleTests
         Assert.True(process.ExitCode == 0, await process.StandardError.ReadToEndAsync());
     }
 
+    private sealed record InstalledToolResult(int ExitCode, string StandardOutput, string StandardError);
+
+    private sealed class InstalledToolHarness : IAsyncDisposable
+    {
+        private readonly string root;
+        private readonly string commandPath;
+
+        private InstalledToolHarness(string root, string commandPath)
+        {
+            this.root = root;
+            this.commandPath = commandPath;
+        }
+
+        internal static async Task<InstalledToolHarness> CreateAsync()
+        {
+            var root = Directory.CreateTempSubdirectory("logschema-installed-tool-");
+            var feed = Path.Combine(root.FullName, "feed");
+            var toolPath = Path.Combine(root.FullName, "tool");
+            Directory.CreateDirectory(feed);
+            Directory.CreateDirectory(toolPath);
+
+            var projectPath = FindRepositoryFile("src", "KeelMatrix.LogSchema", "KeelMatrix.LogSchema.csproj");
+            var pack = await RunProcessAsync("dotnet", ["pack", projectPath, "-c", "Release", "--no-restore", "--nologo", "-o", feed]);
+            Assert.Equal(0, pack.ExitCode);
+            Assert.Empty(pack.StandardError);
+
+            var packagePath = Assert.Single(Directory.GetFiles(feed, "KeelMatrix.LogSchema.*.nupkg"));
+            var packageVersion = Path.GetFileNameWithoutExtension(packagePath)["KeelMatrix.LogSchema.".Length..];
+            var install = await RunProcessAsync("dotnet", ["tool", "install", "KeelMatrix.LogSchema", "--tool-path", toolPath, "--version", packageVersion, "--add-source", feed, "--configfile", FindRepositoryFile("NuGet.config"), "--no-cache", "--ignore-failed-sources"]);
+            Assert.Equal(0, install.ExitCode);
+            Assert.Empty(install.StandardError);
+
+            var commandName = OperatingSystem.IsWindows() ? "logschema.exe" : "logschema";
+            var commandPath = Path.Combine(toolPath, commandName);
+            Assert.True(File.Exists(commandPath), $"installed tool command was not found at {commandPath}");
+            return new InstalledToolHarness(root.FullName, commandPath);
+        }
+
+        internal Task<InstalledToolResult> RunAsync(params string[] arguments) => RunProcessAsync(commandPath, arguments);
+
+        public ValueTask DisposeAsync()
+        {
+            try
+            {
+                if (Directory.Exists(root))
+                {
+                    Directory.Delete(root, recursive: true);
+                }
+            }
+            catch (IOException)
+            {
+            }
+            catch (UnauthorizedAccessException)
+            {
+            }
+
+            return ValueTask.CompletedTask;
+        }
+
+        private static async Task<InstalledToolResult> RunProcessAsync(string fileName, IReadOnlyList<string> arguments)
+        {
+            using var process = new Process
+            {
+                StartInfo = new ProcessStartInfo
+                {
+                    FileName = fileName,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                }
+            };
+            foreach (var argument in arguments)
+            {
+                process.StartInfo.ArgumentList.Add(argument);
+            }
+
+            Assert.True(process.Start(), $"could not start {fileName}");
+            var outputTask = process.StandardOutput.ReadToEndAsync();
+            var errorTask = process.StandardError.ReadToEndAsync();
+            await process.WaitForExitAsync();
+            return new InstalledToolResult(process.ExitCode, await outputTask, await errorTask);
+        }
+    }
+
     private static void InvokePrimary(ILogger logger)
     {
         PrimaryLogging.Fast(logger, 1);
@@ -134,6 +257,7 @@ public sealed class GeneratorDifferentialOracleTests
         PrimaryLogging.Dynamic(logger, LogLevel.Warning, 7);
         PrimaryLogging.Six(logger, 1, 2, 3, 4, 5, 6);
         PrimaryLogging.Seven(logger, 1, 2, 3, 4, 5, 6, 7);
+        PrimaryLogging.Mixed(logger, 1, 2);
     }
 
     private static void InvokeStable(ILogger logger)
@@ -147,6 +271,7 @@ public sealed class GeneratorDifferentialOracleTests
         StableLogging.Dynamic(logger, LogLevel.Warning, 7);
         StableLogging.Six(logger, 1, 2, 3, 4, 5, 6);
         StableLogging.Seven(logger, 1, 2, 3, 4, 5, 6, 7);
+        StableLogging.Mixed(logger, 1, 2);
     }
 
     private static void CopyDirectory(string source, string destination)

@@ -192,7 +192,7 @@ public sealed class ManifestJsonTests
                 await Assert.ThrowsAsync<ManifestReadException>(() => ManifestJson.ReadAsync(aliasPath, CancellationToken.None));
             }
 
-            foreach (var level in new[] { "2", int.MinValue.ToString(System.Globalization.CultureInfo.InvariantCulture), int.MaxValue.ToString(System.Globalization.CultureInfo.InvariantCulture) })
+            foreach (var level in new[] { int.MinValue.ToString(System.Globalization.CultureInfo.InvariantCulture), "-7", "7", int.MaxValue.ToString(System.Globalization.CultureInfo.InvariantCulture) })
             {
                 var canonical = JsonNode.Parse(original.ToJsonString())!;
                 canonical["events"]![0]!["level"] = level;
@@ -200,11 +200,70 @@ public sealed class ManifestJsonTests
                 await File.WriteAllTextAsync(canonicalPath, Sign(canonical).ToJsonString());
                 _ = await ManifestJson.ReadAsync(canonicalPath, CancellationToken.None);
             }
+
+            foreach (var level in new[] { "Trace", "Debug", "Information", "Warning", "Error", "Critical", "None" })
+            {
+                var named = JsonNode.Parse(original.ToJsonString())!;
+                named["events"]![0]!["level"] = level;
+                var namedPath = Path.Combine(root.FullName, "level-named-" + level + ".json");
+                await File.WriteAllTextAsync(namedPath, Sign(named).ToJsonString());
+                _ = await ManifestJson.ReadAsync(namedPath, CancellationToken.None);
+            }
+
+            foreach (var level in new[] { "0", "1", "2", "3", "4", "5", "6", "+2", "02", " 2 ", "information", "INFORMATION" })
+            {
+                var alias = JsonNode.Parse(original.ToJsonString())!;
+                alias["events"]![0]!["level"] = level;
+                var aliasPath = Path.Combine(root.FullName, "level-alias-" + level.Trim().Replace('+', 'p').Replace('-', 'm') + ".json");
+                await File.WriteAllTextAsync(aliasPath, Sign(alias).ToJsonString());
+                await Assert.ThrowsAsync<ManifestReadException>(() => ManifestJson.ReadAsync(aliasPath, CancellationToken.None));
+            }
         }
         finally
         {
             root.Delete(true);
         }
+
+        static JsonNode Sign(JsonNode candidate)
+        {
+            candidate.AsObject().Remove("integrity");
+            var model = JsonSerializer.Deserialize<ManifestDocument>(candidate.ToJsonString())!;
+            var unsigned = JsonSerializer.Serialize(model.Canonicalize() with { Integrity = null }, IntegritySigningOptions);
+            candidate.AsObject()["integrity"] = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(unsigned)));
+            return candidate;
+        }
+    }
+
+    [Fact]
+    public async Task CorrectlyDigestedInformationAndNumericAliasFailsAsAnalysisErrorBeforeComparison()
+    {
+        var root = Directory.CreateTempSubdirectory("logschema-level-alias-comparison-");
+        var namedPath = Path.Combine(root.FullName, "information.json");
+        var numericPath = Path.Combine(root.FullName, "numeric.json");
+        await ManifestJson.WriteAsync(
+            new ManifestDocument(
+                1,
+                [new ProjectIdentity("P|net8.0", "P", "P", "net8.0")],
+                [SyntheticEvent("P.Logging.Event`0(None:ILogger:Microsoft.Extensions.Logging.ILogger,None:None:int)", "Event", ["ILogger", "None"], ["Microsoft.Extensions.Logging.ILogger", "int"])],
+                [], [], [], []),
+            namedPath,
+            CancellationToken.None);
+
+        var numeric = JsonNode.Parse(await File.ReadAllTextAsync(namedPath))!;
+        numeric["events"]![0]!["level"] = "2";
+        await File.WriteAllTextAsync(numericPath, Sign(numeric).ToJsonString());
+
+        using var output = new StringWriter();
+        using var errors = new StringWriter();
+        var exitCode = await CommandRunner.RunAsync(["diff", namedPath, numericPath, "--format", "json", "--severity", "all", "--no-telemetry"], output, errors);
+        Assert.Equal(3, exitCode);
+        Assert.Empty(errors.ToString());
+        using var envelope = JsonDocument.Parse(output.ToString());
+        Assert.Empty(envelope.RootElement.GetProperty("findings").EnumerateArray());
+        Assert.False(envelope.RootElement.GetProperty("coverageComplete").GetBoolean());
+        Assert.Contains(envelope.RootElement.GetProperty("analysisErrors").EnumerateArray(), error => error.GetString()!.Contains("non-canonical", StringComparison.OrdinalIgnoreCase));
+
+        root.Delete(true);
 
         static JsonNode Sign(JsonNode candidate)
         {

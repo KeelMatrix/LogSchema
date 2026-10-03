@@ -335,8 +335,10 @@ Compatibility summary:
   WARNING  Fixed/dynamic or named LogLevel changes (use --severity warning to gate).
   INFO     Event/structured-state additions and message-template changes with unchanged structured state.
   A placeholder is one occurrence in the message template. Structured state is the unique, method-ordered
-  set of emitted properties produced by the generator; a matched placeholder preserves its raw emitted
-  spelling, including @, otherwise the source parameter's code spelling is emitted. Parameter roles record
+  set of emitted properties produced by the generator. When every structured parameter has one occurrence,
+  the LoggerMessage.Define path preserves the matched placeholder's raw emitted spelling, including @;
+  when occurrence count differs from structured-parameter count, the generated-state path starts from the
+  source code name and only adopts a case-insensitive exact code-name placeholder match. Parameter roles record
   the first logger, exception, and LogLevel candidates independently; later candidates are state parameters.
   A dynamic first LogLevel supplies the runtime level and is excluded from state, while a fixed-level first LogLevel is emitted as state.
   Fixed and dynamic level sources are distinct.
@@ -348,7 +350,9 @@ Compatibility summary:
   Structured identity fields use exact ordinal comparison; case-only emitted-property renames are KMLOG102.
   Declared type text must be canonical; forms are classified structurally: top-level ILogger arity 0/1,
   exact top-level LogLevel or Exception, else None. Duplicate decoded manifest properties, known built-in
-  type/role contradictions, and non-canonical numeric levels are rejected. Non-canonical text and form contradictions return 3
+  type/role contradictions, and non-canonical effective-level representations are rejected. Defined LogLevel values use
+  exact names; canonical integers are reserved for unnamed values outside the enum range, so Information/2, signs,
+  zero-padding, and case variants return 3. Non-canonical text and form contradictions return 3
   with incomplete coverage and no findings. Raw type prefixes and suffixes are never trusted.
   Manifest reads cross-validate fixed/dynamic level fields and recompute the exact placeholder occurrence
   sequence from message. Every comparable v1 manifest requires a canonical SHA-256 integrity value;

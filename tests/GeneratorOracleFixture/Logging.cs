@@ -30,4 +30,7 @@ public static partial class Logging
 
     [LoggerMessage(EventId = 9, Level = LogLevel.Information, Message = "Seven {one} {two} {three} {four} {five} {six} {seven}")]
     public static partial void Seven(ILogger logger, int one, int two, int three, int four, int five, int six, int seven);
+
+    [LoggerMessage(EventId = 10, Level = LogLevel.Information, Message = "Mixed {second} {first} {first}")]
+    public static partial void Mixed(ILogger logger, int first, int second);
 }

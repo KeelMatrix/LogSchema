@@ -645,9 +645,9 @@ internal static class ManifestJson
         }
     }
 
-    private static bool IsEffectiveLevel(string? level) => level is "Trace" or "Debug" or "Information" or "Warning" or "Error" or "Critical" or "None" or "Dynamic" ||
-        int.TryParse(level, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var numeric) &&
-        string.Equals(level, numeric.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal);
+    private static bool IsEffectiveLevel(string? level) =>
+        string.Equals(level, "Dynamic", StringComparison.Ordinal) ||
+        LoggerMessageGeneratorSemantics.IsFixedLevel(level);
 
     private static bool IsLevelSource(string? source) => source is "Fixed" or "Dynamic";
 
@@ -700,6 +700,10 @@ internal static class ManifestJson
         }
 
         var parameterIndexes = @event.Parameters.Select((parameter, index) => (parameter.Name, index)).ToDictionary(item => item.Name, item => item.index, StringComparer.Ordinal);
+        var expectedStateParameters = @event.Parameters
+            .Where(parameter => semantics.IsStructuredState(parameter.Name, dynamicLevel, @event.Placeholders))
+            .Select(parameter => parameter.Name)
+            .ToHashSet(StringComparer.Ordinal);
         var structuredNames = new HashSet<string>(StringComparer.Ordinal);
         var lastIndex = -1;
         foreach (var property in @event.StructuredState)
@@ -712,7 +716,7 @@ internal static class ManifestJson
             }
 
             var parameter = @event.Parameters[index];
-            var expectedEmittedName = LoggerMessageGeneratorSemantics.EmittedName(parameter.Name, parameter.CodeName ?? parameter.Name, @event.Placeholders);
+            var expectedEmittedName = LoggerMessageGeneratorSemantics.EmittedName(parameter.Name, parameter.CodeName ?? parameter.Name, @event.Placeholders, expectedStateParameters.Count);
             if (!string.Equals(property.EmittedName, expectedEmittedName, StringComparison.Ordinal))
             {
                 throw new ManifestValidationException("A manifest structured state model has an emitted name that contradicts its template or parameter name.");
@@ -721,10 +725,6 @@ internal static class ManifestJson
             lastIndex = index;
         }
 
-        var expectedStateParameters = @event.Parameters
-            .Where(parameter => semantics.IsStructuredState(parameter.Name, dynamicLevel, @event.Placeholders))
-            .Select(parameter => parameter.Name)
-            .ToHashSet(StringComparer.Ordinal);
         if (!expectedStateParameters.SetEquals(structuredNames))
         {
             throw new ManifestValidationException("A manifest structured state model does not match the effective state parameter set.");

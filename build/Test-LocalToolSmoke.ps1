@@ -335,6 +335,17 @@ try {
     $cleanDiff = Invoke-LocalTool -Label 'local-manifest clean diff' -Arguments @('diff', $baseline, $baseline, '--no-telemetry')
     Assert-That ($cleanDiff.ExitCode -eq 0 -and $cleanDiff.Output -match 'LogSchema: no gated incompatibilities found\.') 'manifest-pinned clean diff must return exit 0'
 
+    $numericLevelManifest = Get-Content -Raw -LiteralPath $baseline | ConvertFrom-Json
+    $numericLevelEvents = @($numericLevelManifest.events | Where-Object method -eq 'Processed')
+    Assert-That ($numericLevelEvents.Count -eq 1 -and $numericLevelEvents[0].level -eq 'Information') 'the installed baseline must contain the named Information level control'
+    $numericLevelEvents[0].level = '2'
+    $numericLevelPath = Join-Path $freshCheckout 'information-as-numeric.json'
+    Write-SignedManifest -Manifest $numericLevelManifest -Destination $numericLevelPath
+    $numericLevelCheck = Invoke-LocalTool -Label 'local-manifest non-canonical Information alias check' -Arguments @('check', $consumerProject, '--baseline', $numericLevelPath, '--format', 'json', '--severity', 'all', '--no-telemetry')
+    Assert-AnalysisErrorEnvelope -Result $numericLevelCheck -Label 'installed non-canonical Information alias check' -ForbiddenPath $freshCheckout
+    $numericLevelDiff = Invoke-LocalTool -Label 'local-manifest non-canonical Information alias diff' -Arguments @('diff', $baseline, $numericLevelPath, '--format', 'json', '--severity', 'all', '--no-telemetry')
+    Assert-AnalysisErrorEnvelope -Result $numericLevelDiff -Label 'installed non-canonical Information alias diff' -ForbiddenPath $freshCheckout
+
     function Write-IdentityMutation {
         param(
             [Parameter(Mandatory = $true)][string]$Mutation,

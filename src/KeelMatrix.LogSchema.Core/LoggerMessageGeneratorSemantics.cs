@@ -210,6 +210,7 @@ internal static class LoggerMessageGeneratorSemantics
     internal static bool IsFixedLevel(string? level) =>
         level is "Trace" or "Debug" or "Information" or "Warning" or "Error" or "Critical" or "None" ||
         int.TryParse(level, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var numeric) &&
+        numeric is < 0 or > 6 &&
         string.Equals(level, numeric.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal);
 
     internal static bool IsSupportedGeneratorVersion(IReadOnlySet<string> versions) =>
@@ -318,11 +319,25 @@ internal static class LoggerMessageGeneratorSemantics
         string.Equals(parameterName, placeholderName, StringComparison.OrdinalIgnoreCase) ||
         string.Equals("@" + parameterName, placeholderName, StringComparison.OrdinalIgnoreCase);
 
-    internal static string EmittedName(string parameterName, string codeName, IReadOnlyList<Placeholder> placeholders) =>
-        placeholders.FirstOrDefault(placeholder => PlaceholderMatches(parameterName, placeholder.Name))?.Name ?? codeName;
+    internal static string EmittedName(string parameterName, string codeName, IReadOnlyList<Placeholder> placeholders, int structuredParameterCount)
+    {
+        // LoggerMessage uses the Define callback when every structured parameter
+        // has one template occurrence. That callback retains the raw occurrence
+        // spelling. When the counts differ, the generated-state path starts from
+        // the source code name and only adopts a template spelling that exactly
+        // matches that code name (case-insensitively). In particular, a leading
+        // structured-state '@' is not an exact match for an ordinary code name.
+        if (placeholders.Count == structuredParameterCount)
+        {
+            return placeholders.FirstOrDefault(placeholder => PlaceholderMatches(parameterName, placeholder.Name))?.Name ?? codeName;
+        }
 
-    internal static string EmittedName(string parameterName, IReadOnlyList<Placeholder> placeholders) =>
-        EmittedName(parameterName, parameterName, placeholders);
+        return placeholders.FirstOrDefault(placeholder =>
+            string.Equals(codeName, placeholder.Name, StringComparison.OrdinalIgnoreCase))?.Name ?? codeName;
+    }
+
+    internal static string EmittedName(string parameterName, IReadOnlyList<Placeholder> placeholders, int structuredParameterCount) =>
+        EmittedName(parameterName, parameterName, placeholders, structuredParameterCount);
 
     private static bool IsBaseOrIdentity(ITypeSymbol source, ITypeSymbol destination, Compilation compilation)
     {
