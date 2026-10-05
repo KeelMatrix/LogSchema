@@ -17,6 +17,8 @@ internal sealed record GeneratorParameterSemantics(string Name, GeneratorParamet
     internal string Role => LoggerMessageGeneratorSemantics.FormatRole(Roles);
 }
 
+internal sealed record LoggerMessageDefineParameter(string Name, string CodeName);
+
 internal sealed record LoggerMessageMethodSemantics(
     IReadOnlyList<GeneratorParameterSemantics> Parameters,
     string LoggerParameter,
@@ -320,26 +322,50 @@ internal static class LoggerMessageGeneratorSemantics
         string.Equals(parameterName, placeholderName, StringComparison.OrdinalIgnoreCase) ||
         string.Equals("@" + parameterName, placeholderName, StringComparison.OrdinalIgnoreCase);
 
-    internal static string EmittedName(string parameterName, string codeName, IReadOnlyList<Placeholder> placeholders, int structuredParameterCount)
+    internal static bool UsesLoggerMessageDefine(
+        int genericArity,
+        bool dynamicLevel,
+        IReadOnlyList<LoggerMessageDefineParameter> templateParameters,
+        IReadOnlyList<Placeholder> placeholders)
     {
-        // The generator uses LoggerMessage.Define only when every structured
-        // parameter has one template occurrence and the Define overload supports
-        // the structured parameter count (at most six). That callback retains
-        // the raw occurrence spelling. Otherwise the generated-state path starts
-        // from the source code name and only adopts a case-insensitive exact
-        // code-name match. In particular, a leading structured-state '@' is not
-        // an exact match for an ordinary code name on that path.
-        if (structuredParameterCount <= LoggerMessageDefineMaxStateParameters && placeholders.Count == structuredParameterCount)
+        if (genericArity != 0 || dynamicLevel || templateParameters.Count > LoggerMessageDefineMaxStateParameters || placeholders.Count != templateParameters.Count)
         {
-            return placeholders.FirstOrDefault(placeholder => PlaceholderMatches(parameterName, placeholder.Name))?.Name ?? codeName;
+            return false;
+        }
+
+        for (var index = 0; index < templateParameters.Count; index++)
+        {
+            if (!string.Equals(
+                    RemoveSpecialSymbol(placeholders[index].Name),
+                    RemoveSpecialSymbol(templateParameters[index].CodeName),
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    internal static string EmittedName(string parameterName, string codeName, IReadOnlyList<Placeholder> placeholders, bool usesLoggerMessageDefine)
+    {
+        // Define receives one argument per template parameter in method
+        // parameter order, so its state keeps the matched template spelling. The
+        // generated-state path starts from the source code name and only adopts
+        // a case-insensitive exact code-name match; a leading '@' on a template
+        // is not an exact match for an ordinary code name on that path.
+        if (usesLoggerMessageDefine)
+        {
+            return placeholders.FirstOrDefault(placeholder =>
+                string.Equals(RemoveSpecialSymbol(parameterName), RemoveSpecialSymbol(placeholder.Name), StringComparison.OrdinalIgnoreCase))?.Name ?? codeName;
         }
 
         return placeholders.FirstOrDefault(placeholder =>
             string.Equals(codeName, placeholder.Name, StringComparison.OrdinalIgnoreCase))?.Name ?? codeName;
     }
 
-    internal static string EmittedName(string parameterName, IReadOnlyList<Placeholder> placeholders, int structuredParameterCount) =>
-        EmittedName(parameterName, parameterName, placeholders, structuredParameterCount);
+    private static string RemoveSpecialSymbol(string name) =>
+        name.Length > 0 && name[0] == '@' ? name[1..] : name;
 
     private static bool IsBaseOrIdentity(ITypeSymbol source, ITypeSymbol destination, Compilation compilation)
     {

@@ -1,6 +1,7 @@
 using System.Collections;
 using System.Diagnostics;
 using System.Globalization;
+using System.CodeDom.Compiler;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using KeelMatrix.LogSchema;
@@ -12,6 +13,29 @@ namespace KeelMatrix.LogSchema.Tests;
 
 public sealed class GeneratorDifferentialOracleTests
 {
+    [Fact]
+    public void PinnedGeneratorsEmitTheExpectedFallbackKeysForBothK1Cases()
+    {
+        AssertGeneratorVersion(typeof(PrimaryLogging), "DynamicEscapedPlaceholder", "10.0.13.7005");
+        AssertGeneratorVersion(typeof(StableLogging), "DynamicEscapedPlaceholder", "10.0.14.42308");
+        AssertGeneratedKeys(
+            logger => PrimaryLogging.DynamicEscapedPlaceholder(logger, LogLevel.Warning, 1),
+            "DynamicEscapedPlaceholder",
+            ["value", "{OriginalFormat}"]);
+        AssertGeneratedKeys(
+            logger => PrimaryLogging.ReorderedEscapedPlaceholder(logger, 1, 2),
+            "ReorderedEscapedPlaceholder",
+            ["first", "second", "{OriginalFormat}"]);
+        AssertGeneratedKeys(
+            logger => StableLogging.DynamicEscapedPlaceholder(logger, LogLevel.Warning, 1),
+            "DynamicEscapedPlaceholder",
+            ["value", "{OriginalFormat}"]);
+        AssertGeneratedKeys(
+            logger => StableLogging.ReorderedEscapedPlaceholder(logger, 1, 2),
+            "ReorderedEscapedPlaceholder",
+            ["first", "second", "{OriginalFormat}"]);
+    }
+
     [Fact]
     public async Task InstalledToolMatchesRealGeneratorStateForBothSupportedPairs()
     {
@@ -74,6 +98,62 @@ public sealed class GeneratorDifferentialOracleTests
         }
     }
 
+    [Fact]
+    public async Task InstalledCheckAndDiffGateDynamicAndReorderedStateMutationsForBothSupportedPairs()
+    {
+        await using var tool = await InstalledToolHarness.CreateAsync();
+        var mutations = new (string Method, Func<string, string> Apply)[]
+        {
+            (
+                "DynamicEscapedPlaceholder",
+                source => source
+                    .Replace("Dynamic escaped {@value}", "Dynamic escaped {@renamedValue}", StringComparison.Ordinal)
+                    .Replace("DynamicEscapedPlaceholder(ILogger logger, LogLevel level, int value)", "DynamicEscapedPlaceholder(ILogger logger, LogLevel level, int renamedValue)", StringComparison.Ordinal)),
+            (
+                "ReorderedEscapedPlaceholder",
+                source => source
+                    .Replace("Reordered {@second} {first}", "Reordered {@second} {renamedFirst}", StringComparison.Ordinal)
+                    .Replace("ReorderedEscapedPlaceholder(ILogger logger, int first, int second)", "ReorderedEscapedPlaceholder(ILogger logger, int renamedFirst, int second)", StringComparison.Ordinal))
+        };
+
+        foreach (var fixtureName in new[] { "GeneratorOracleFixture", "GeneratorOracleStableFixture" })
+        {
+            var root = Directory.CreateTempSubdirectory("logschema-generator-transition-");
+            var copiedProject = Path.Combine(root.FullName, fixtureName);
+            CopyDirectory(FindRepositoryFile("tests", fixtureName), copiedProject);
+            var projectPath = Path.Combine(copiedProject, fixtureName + ".csproj");
+            var sourcePath = Path.Combine(copiedProject, "Logging.cs");
+            var baselinePath = Path.Combine(root.FullName, "baseline.json");
+            var currentPath = Path.Combine(root.FullName, "current.json");
+            try
+            {
+                await RestoreAsync(projectPath);
+                var original = await File.ReadAllTextAsync(sourcePath);
+                await CaptureAsync(tool, projectPath, baselinePath);
+
+                foreach (var (method, apply) in mutations)
+                {
+                    await File.WriteAllTextAsync(sourcePath, original);
+                    var baselineKeys = await InvokeBuiltFixtureAsync(projectPath, fixtureName, method);
+                    await AssertManifestMatchesState(baselinePath, method, baselineKeys);
+
+                    var mutated = apply(original);
+                    Assert.NotEqual(original, mutated);
+                    await File.WriteAllTextAsync(sourcePath, mutated);
+                    await CaptureAsync(tool, projectPath, currentPath);
+
+                    var currentKeys = await InvokeBuiltFixtureAsync(projectPath, fixtureName, method);
+                    await AssertManifestMatchesState(currentPath, method, currentKeys);
+                    await AssertBreakingStateChange(tool, projectPath, baselinePath, currentPath, method);
+                }
+            }
+            finally
+            {
+                root.Delete(true);
+            }
+        }
+    }
+
     private static async Task AssertFixtureMatchesGenerator(InstalledToolHarness tool, string projectPath, Action<ILogger> invoke)
     {
         var root = Directory.CreateTempSubdirectory("logschema-generator-oracle-manifest-");
@@ -101,6 +181,8 @@ public sealed class GeneratorDifferentialOracleTests
             Assert.Equal(["one", "two", "three", "four", "five", "@six", "{OriginalFormat}"], actual["Six"]);
             Assert.Equal(["one", "two", "three", "four", "five", "six", "seven", "{OriginalFormat}"], actual["Seven"]);
             Assert.Equal(["first", "second", "{OriginalFormat}"], actual["Mixed"]);
+            Assert.Equal(["value", "{OriginalFormat}"], actual["DynamicEscapedPlaceholder"]);
+            Assert.Equal(["first", "second", "{OriginalFormat}"], actual["ReorderedEscapedPlaceholder"]);
         }
         finally
         {
@@ -159,7 +241,24 @@ public sealed class GeneratorDifferentialOracleTests
         Assert.Equal(expectedKeys, actualKeys);
     }
 
-    private static async Task<IReadOnlyList<string>> InvokeBuiltFixtureAsync(string projectPath, string fixtureName)
+    private static void AssertGeneratedKeys(Action<ILogger> invoke, string method, IReadOnlyList<string> expectedKeys)
+    {
+        var logger = new CapturingLogger();
+        invoke(logger);
+        Assert.Equal(expectedKeys, Assert.Single(logger.Events, item => item.Name == method).Keys);
+    }
+
+    private static void AssertGeneratorVersion(Type fixtureType, string method, string expectedVersion)
+    {
+        var generatedCode = fixtureType.GetMethod(method)?.GetCustomAttributes(typeof(GeneratedCodeAttribute), inherit: false)
+            .Cast<GeneratedCodeAttribute>()
+            .SingleOrDefault();
+        Assert.NotNull(generatedCode);
+        Assert.Equal("Microsoft.Extensions.Logging.Generators", generatedCode!.Tool);
+        Assert.Equal(expectedVersion, generatedCode.Version);
+    }
+
+    private static async Task<IReadOnlyList<string>> InvokeBuiltFixtureAsync(string projectPath, string fixtureName, string method = "EscapedPlaceholder")
     {
         var projectDirectory = Path.GetDirectoryName(projectPath)!;
         var project = await File.ReadAllTextAsync(projectPath);
@@ -168,6 +267,12 @@ public sealed class GeneratorDifferentialOracleTests
         await File.WriteAllTextAsync(projectPath, project.Replace(targetFramework, targetFramework + "<OutputType>Exe</OutputType>", StringComparison.Ordinal));
 
         var fixtureNamespace = fixtureName == "GeneratorOracleFixture" ? "GeneratorOracleFixture" : "GeneratorOracleStableFixture";
+        var invocation = method switch
+        {
+            "DynamicEscapedPlaceholder" => "Logging.DynamicEscapedPlaceholder(logger, LogLevel.Warning, 2);",
+            "ReorderedEscapedPlaceholder" => "Logging.ReorderedEscapedPlaceholder(logger, 1, 2);",
+            _ => "Logging.EscapedPlaceholder(logger, 2);"
+        };
         var runner = $$"""
             using System.Collections;
             using System.Text.Json;
@@ -179,7 +284,7 @@ public sealed class GeneratorDifferentialOracleTests
                 private static void Main()
                 {
                     var logger = new CapturingLogger();
-                    Logging.EscapedPlaceholder(logger, 2);
+                    {{invocation}}
                     Console.WriteLine(JsonSerializer.Serialize(logger.Keys));
                 }
 
@@ -335,6 +440,8 @@ public sealed class GeneratorDifferentialOracleTests
         PrimaryLogging.Six(logger, 1, 2, 3, 4, 5, 6);
         PrimaryLogging.Seven(logger, 1, 2, 3, 4, 5, 6, 7);
         PrimaryLogging.Mixed(logger, 1, 2);
+        PrimaryLogging.DynamicEscapedPlaceholder(logger, LogLevel.Warning, 8);
+        PrimaryLogging.ReorderedEscapedPlaceholder(logger, 1, 2);
     }
 
     private static void InvokeStable(ILogger logger)
@@ -349,6 +456,8 @@ public sealed class GeneratorDifferentialOracleTests
         StableLogging.Six(logger, 1, 2, 3, 4, 5, 6);
         StableLogging.Seven(logger, 1, 2, 3, 4, 5, 6, 7);
         StableLogging.Mixed(logger, 1, 2);
+        StableLogging.DynamicEscapedPlaceholder(logger, LogLevel.Warning, 8);
+        StableLogging.ReorderedEscapedPlaceholder(logger, 1, 2);
     }
 
     private static void CopyDirectory(string source, string destination)

@@ -702,8 +702,17 @@ internal static class ManifestJson
         var parameterIndexes = @event.Parameters.Select((parameter, index) => (parameter.Name, index)).ToDictionary(item => item.Name, item => item.index, StringComparer.Ordinal);
         var expectedStateParameters = @event.Parameters
             .Where(parameter => semantics.IsStructuredState(parameter.Name, dynamicLevel, @event.Placeholders))
+            .ToArray();
+        var expectedStateParameterNames = expectedStateParameters
             .Select(parameter => parameter.Name)
             .ToHashSet(StringComparer.Ordinal);
+        var usesLoggerMessageDefine = LoggerMessageGeneratorSemantics.UsesLoggerMessageDefine(
+            @event.GenericArity,
+            dynamicLevel,
+            expectedStateParameters
+                .Select(parameter => new LoggerMessageDefineParameter(parameter.Name, parameter.CodeName ?? parameter.Name))
+                .ToArray(),
+            @event.Placeholders);
         var structuredNames = new HashSet<string>(StringComparer.Ordinal);
         var lastIndex = -1;
         foreach (var property in @event.StructuredState)
@@ -716,7 +725,7 @@ internal static class ManifestJson
             }
 
             var parameter = @event.Parameters[index];
-            var expectedEmittedName = LoggerMessageGeneratorSemantics.EmittedName(parameter.Name, parameter.CodeName ?? parameter.Name, @event.Placeholders, expectedStateParameters.Count);
+            var expectedEmittedName = LoggerMessageGeneratorSemantics.EmittedName(parameter.Name, parameter.CodeName ?? parameter.Name, @event.Placeholders, usesLoggerMessageDefine);
             if (!string.Equals(property.EmittedName, expectedEmittedName, StringComparison.Ordinal))
             {
                 throw new ManifestValidationException("A manifest structured state model has an emitted name that contradicts its template or parameter name.");
@@ -725,7 +734,7 @@ internal static class ManifestJson
             lastIndex = index;
         }
 
-        if (!expectedStateParameters.SetEquals(structuredNames))
+        if (!expectedStateParameterNames.SetEquals(structuredNames))
         {
             throw new ManifestValidationException("A manifest structured state model does not match the effective state parameter set.");
         }

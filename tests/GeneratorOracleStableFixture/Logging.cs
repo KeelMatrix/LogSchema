@@ -33,4 +33,10 @@ public static partial class Logging
 
     [LoggerMessage(EventId = 110, Level = LogLevel.Information, Message = "Mixed {second} {first} {first}")]
     public static partial void Mixed(ILogger logger, int first, int second);
+
+    [LoggerMessage(EventId = 111, Message = "Dynamic escaped {@value}")]
+    public static partial void DynamicEscapedPlaceholder(ILogger logger, LogLevel level, int value);
+
+    [LoggerMessage(EventId = 112, Level = LogLevel.Information, Message = "Reordered {@second} {first}")]
+    public static partial void ReorderedEscapedPlaceholder(ILogger logger, int first, int second);
 }

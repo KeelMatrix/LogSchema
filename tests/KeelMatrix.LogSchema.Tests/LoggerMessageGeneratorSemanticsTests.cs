@@ -117,4 +117,57 @@ public sealed class LoggerMessageGeneratorSemanticsTests
         Assert.False(LoggerMessageGeneratorSemantics.TryValidateTemplate(semantics, dynamicLevel: false, "Event {logger}", [new Placeholder("logger", "logger")], out reason));
         Assert.Contains("generator-special Logger", reason, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void LoggerMessageDefinePredicateMatchesThePinnedGeneratorSelectionRules()
+    {
+        var escaped = new[] { new LoggerMessageDefineParameter("value", "@value") };
+        Assert.True(LoggerMessageGeneratorSemantics.UsesLoggerMessageDefine(
+            genericArity: 0,
+            dynamicLevel: false,
+            escaped,
+            [new Placeholder("@VALUE", "@VALUE")]));
+        Assert.Equal("@VALUE", LoggerMessageGeneratorSemantics.EmittedName("value", "@value", [new Placeholder("@VALUE", "@VALUE")], usesLoggerMessageDefine: true));
+        Assert.Equal("value", LoggerMessageGeneratorSemantics.EmittedName("value", "value", [new Placeholder("@value", "@value")], usesLoggerMessageDefine: false));
+
+        Assert.False(LoggerMessageGeneratorSemantics.UsesLoggerMessageDefine(
+            genericArity: 0,
+            dynamicLevel: true,
+            escaped,
+            [new Placeholder("@value", "@value")]));
+        Assert.False(LoggerMessageGeneratorSemantics.UsesLoggerMessageDefine(
+            genericArity: 1,
+            dynamicLevel: false,
+            escaped,
+            [new Placeholder("@value", "@value")]));
+
+        var six = Enumerable.Range(1, 6)
+            .Select(index => new LoggerMessageDefineParameter($"value{index}", $"value{index}"))
+            .ToArray();
+        var sixPlaceholders = six.Select(parameter => new Placeholder(parameter.Name, parameter.Name)).ToArray();
+        Assert.True(LoggerMessageGeneratorSemantics.UsesLoggerMessageDefine(0, false, six, sixPlaceholders));
+
+        var seven = Enumerable.Range(1, 7)
+            .Select(index => new LoggerMessageDefineParameter($"value{index}", $"value{index}"))
+            .ToArray();
+        var sevenPlaceholders = seven.Select(parameter => new Placeholder(parameter.Name, parameter.Name)).ToArray();
+        Assert.False(LoggerMessageGeneratorSemantics.UsesLoggerMessageDefine(0, false, seven, sevenPlaceholders));
+
+        var ordered = new[]
+        {
+            new LoggerMessageDefineParameter("first", "first"),
+            new LoggerMessageDefineParameter("second", "second")
+        };
+        Assert.False(LoggerMessageGeneratorSemantics.UsesLoggerMessageDefine(
+            0,
+            false,
+            ordered,
+            [new Placeholder("@second", "@second"), new Placeholder("first", "first")]));
+        Assert.Equal("second", LoggerMessageGeneratorSemantics.EmittedName("second", "second", [new Placeholder("@second", "@second"), new Placeholder("first", "first")], usesLoggerMessageDefine: false));
+        Assert.False(LoggerMessageGeneratorSemantics.UsesLoggerMessageDefine(
+            0,
+            false,
+            [new LoggerMessageDefineParameter("value", "value")],
+            [new Placeholder("value", "value"), new Placeholder("value", "value")]));
+    }
 }

@@ -4,6 +4,10 @@ Changes for the KeelMatrix.LogSchema package are recorded here using the Keep a 
 
 ## [Unreleased]
 
+### Fixed
+
+- Match emitted structured-state names to the pinned generator's complete `LoggerMessage.Define` selection predicate, including dynamic levels, generic methods, maximum arity, occurrence count, and parameter order after leading `@` removal.
+
 ## [0.1.0] - Planned
 
 ### Added
@@ -25,6 +29,6 @@ Changes for the KeelMatrix.LogSchema package are recorded here using the Keep a 
 - One coherent project-analysis budget covering solution preflight, source document counts and bytes, compilation/generated syntax trees and text, and incremental LoggerMessage declaration/event/unsupported counts, with actionable exit-3 failures and explicit MSBuild trust-boundary wording.
 - Generator-grounded `LoggerMessage` semantics for the exact resolved `Microsoft.Extensions.Logging.Abstractions` 10.0.1 / generator assembly 10.0.13.7005 and 10.0.12 / generator assembly 10.0.14.42308 pairs, including independent first-special-role classification, `GeneratorDriver.GetRunResult()` diagnostics, symbol-bound source/generated pairing, generator-equivalent template parsing, and fail-closed project and solution version detection.
 - Fail-closed persisted-manifest integrity: captured manifests validate their canonical contents before comparison, level-source fields are cross-validated, and placeholder occurrences are recomputed from the message before comparison.
-- Generator-path-emitted state fidelity for escaped source parameter names, raw `@` placeholder spellings, occurrence-count and six-parameter `Define` arity selection, and differential-oracle coverage across both supported package/generator pairs.
+- Generator-path-emitted state fidelity for escaped source parameter names and raw `@` placeholder spellings, using fixed/dynamic level, generic-method, six-parameter arity, occurrence-count, and ordered-name conditions to select `LoggerMessage.Define`; differential-oracle coverage spans both supported package/generator pairs.
 - Fail-closed manifest validation for duplicate decoded properties, known built-in type/role contradictions, one canonical representation per effective level, and evaluated-project target-framework identity.
 - Per-project generated-tree budget lifecycle, pre-conversion generated-text bounds, and duplicate generator/compiler observation accounting.

@@ -1034,10 +1034,17 @@ internal sealed class LogSchemaExtractor
             .Select((parameter, index) => (parameter, index))
             .Where(item => semantics.IsStructuredState(item.parameter.Name, dynamicLevel, placeholders))
             .ToArray();
+        var usesLoggerMessageDefine = LoggerMessageGeneratorSemantics.UsesLoggerMessageDefine(
+            method.Arity,
+            dynamicLevel,
+            structuredParameters
+                .Select(item => new LoggerMessageDefineParameter(item.parameter.Name, codeNames[item.index]))
+                .ToArray(),
+            placeholders);
         var structuredState = structuredParameters
             .Select(item =>
             {
-                return new StructuredStateProperty(item.parameter.Name, LoggerMessageGeneratorSemantics.EmittedName(item.parameter.Name, codeNames[item.index], placeholders, structuredParameters.Length));
+                return new StructuredStateProperty(item.parameter.Name, LoggerMessageGeneratorSemantics.EmittedName(item.parameter.Name, codeNames[item.index], placeholders, usesLoggerMessageDefine));
             })
             .ToArray();
 
