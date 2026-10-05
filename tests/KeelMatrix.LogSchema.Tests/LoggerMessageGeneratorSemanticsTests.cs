@@ -51,7 +51,7 @@ public sealed class LoggerMessageGeneratorSemanticsTests
     }
 
     [Fact]
-    public void FixedAndDynamicLevelSourcesShareRolesButDifferInStructuredState()
+    public void FixedAndDynamicLevelSourcesShareRolesButDifferInTemplateParameters()
     {
         var fixedParameters = new[]
         {
@@ -59,7 +59,8 @@ public sealed class LoggerMessageGeneratorSemanticsTests
             new ParameterContract("level", "Microsoft.Extensions.Logging.LogLevel", "None", "LogLevel")
         };
         Assert.True(LoggerMessageGeneratorSemantics.TryCreatePersistedModel(fixedParameters, "logger", null, "Fixed", "Information", "level", out var fixedSemantics, out var fixedReason), fixedReason);
-        Assert.True(fixedSemantics.IsStructuredState("level", dynamicLevel: false, []));
+        Assert.True(fixedSemantics.IsTemplateParameter("level", dynamicLevel: false, []));
+        Assert.Equal(["level"], fixedSemantics.TemplateParameters(dynamicLevel: false, []).Select(parameter => parameter.Name));
 
         var dynamicParameters = new[]
         {
@@ -68,8 +69,29 @@ public sealed class LoggerMessageGeneratorSemanticsTests
             new ParameterContract("laterLevel", "Microsoft.Extensions.Logging.LogLevel", "None", "State")
         };
         Assert.True(LoggerMessageGeneratorSemantics.TryCreatePersistedModel(dynamicParameters, "logger", null, "Dynamic", "Dynamic", "firstLevel", out var dynamicSemantics, out var dynamicReason), dynamicReason);
-        Assert.False(dynamicSemantics.IsStructuredState("firstLevel", dynamicLevel: true, []));
-        Assert.True(dynamicSemantics.IsStructuredState("laterLevel", dynamicLevel: true, []));
+        Assert.False(dynamicSemantics.IsTemplateParameter("firstLevel", dynamicLevel: true, []));
+        Assert.True(dynamicSemantics.IsTemplateParameter("laterLevel", dynamicLevel: true, []));
+        Assert.Equal(["laterLevel"], dynamicSemantics.TemplateParameters(dynamicLevel: true, []).Select(parameter => parameter.Name));
+    }
+
+    [Fact]
+    public void FixedLevelParameterAbsentFromTemplateRemainsInPinnedGeneratorTemplateParameters()
+    {
+        var parameters = new[]
+        {
+            new ParameterContract("logger", "Microsoft.Extensions.Logging.ILogger", "None", "Logger"),
+            new ParameterContract("level", "Microsoft.Extensions.Logging.LogLevel", "None", "LogLevel"),
+            new ParameterContract("value", "int", "None", "State")
+        };
+        Assert.True(LoggerMessageGeneratorSemantics.TryCreatePersistedModel(parameters, "logger", null, "Fixed", "Information", "level", out var semantics, out var reason), reason);
+
+        var templateParameters = semantics.TemplateParameters(dynamicLevel: false, [new Placeholder("@value", "@value")]);
+        Assert.Equal(["level", "value"], templateParameters.Select(parameter => parameter.Name));
+        Assert.False(LoggerMessageGeneratorSemantics.UsesLoggerMessageDefine(
+            genericArity: 0,
+            dynamicLevel: false,
+            templateParameters.Select(parameter => new LoggerMessageDefineParameter(parameter.Name, parameter.Name)).ToArray(),
+            [new Placeholder("@value", "@value")]));
     }
 
     [Theory]

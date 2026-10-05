@@ -1030,18 +1030,21 @@ internal sealed class LogSchemaExtractor
             return false;
         }
 
-        var structuredParameters = method.Parameters
+        var templateParameterNames = semantics.TemplateParameters(dynamicLevel, placeholders)
+            .Select(parameter => parameter.Name)
+            .ToHashSet(StringComparer.Ordinal);
+        var templateParameters = method.Parameters
             .Select((parameter, index) => (parameter, index))
-            .Where(item => semantics.IsStructuredState(item.parameter.Name, dynamicLevel, placeholders))
+            .Where(item => templateParameterNames.Contains(item.parameter.Name))
             .ToArray();
         var usesLoggerMessageDefine = LoggerMessageGeneratorSemantics.UsesLoggerMessageDefine(
             method.Arity,
             dynamicLevel,
-            structuredParameters
+            templateParameters
                 .Select(item => new LoggerMessageDefineParameter(item.parameter.Name, codeNames[item.index]))
                 .ToArray(),
             placeholders);
-        var structuredState = structuredParameters
+        var structuredState = templateParameters
             .Select(item =>
             {
                 return new StructuredStateProperty(item.parameter.Name, LoggerMessageGeneratorSemantics.EmittedName(item.parameter.Name, codeNames[item.index], placeholders, usesLoggerMessageDefine));

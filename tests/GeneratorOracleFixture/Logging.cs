@@ -39,4 +39,7 @@ public static partial class Logging
 
     [LoggerMessage(EventId = 12, Level = LogLevel.Information, Message = "Reordered {@second} {first}")]
     public static partial void ReorderedEscapedPlaceholder(ILogger logger, int first, int second);
+
+    [LoggerMessage(EventId = 13, Level = LogLevel.Information, Message = "Value {@value}")]
+    public static partial void FixedLevelSpecialAbsent(ILogger logger, LogLevel level, int value);
 }

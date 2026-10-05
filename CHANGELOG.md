@@ -7,6 +7,7 @@ Changes for the KeelMatrix.LogSchema package are recorded here using the Keep a 
 ### Fixed
 
 - Match emitted structured-state names to the pinned generator's complete `LoggerMessage.Define` selection predicate, including dynamic levels, generic methods, maximum arity, occurrence count, and parameter order after leading `@` removal.
+- Derive Define eligibility and emitted state from the generator-effective template-parameter list; preserve fixed-level `LogLevel` state parameters emitted by both supported generator/package pairs while excluding a dynamic level parameter.
 
 ## [0.1.0] - Planned
 

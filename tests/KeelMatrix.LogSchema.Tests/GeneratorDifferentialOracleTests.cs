@@ -27,6 +27,10 @@ public sealed class GeneratorDifferentialOracleTests
             "ReorderedEscapedPlaceholder",
             ["first", "second", "{OriginalFormat}"]);
         AssertGeneratedKeys(
+            logger => PrimaryLogging.FixedLevelSpecialAbsent(logger, LogLevel.Warning, 2),
+            "FixedLevelSpecialAbsent",
+            ["level", "value", "{OriginalFormat}"]);
+        AssertGeneratedKeys(
             logger => StableLogging.DynamicEscapedPlaceholder(logger, LogLevel.Warning, 1),
             "DynamicEscapedPlaceholder",
             ["value", "{OriginalFormat}"]);
@@ -34,6 +38,10 @@ public sealed class GeneratorDifferentialOracleTests
             logger => StableLogging.ReorderedEscapedPlaceholder(logger, 1, 2),
             "ReorderedEscapedPlaceholder",
             ["first", "second", "{OriginalFormat}"]);
+        AssertGeneratedKeys(
+            logger => StableLogging.FixedLevelSpecialAbsent(logger, LogLevel.Warning, 2),
+            "FixedLevelSpecialAbsent",
+            ["level", "value", "{OriginalFormat}"]);
     }
 
     [Fact]
@@ -48,6 +56,49 @@ public sealed class GeneratorDifferentialOracleTests
             tool,
             FindRepositoryFile("tests", "GeneratorOracleStableFixture", "GeneratorOracleStableFixture.csproj"),
             InvokeStable);
+    }
+
+    [Fact]
+    public async Task InstalledCheckAndDiffReportRenamedEmittedFixedLevelParameterForBothSupportedPairs()
+    {
+        await using var tool = await InstalledToolHarness.CreateAsync();
+        foreach (var fixtureName in new[] { "GeneratorOracleFixture", "GeneratorOracleStableFixture" })
+        {
+            var root = Directory.CreateTempSubdirectory("logschema-generator-fixed-level-");
+            var copiedProject = Path.Combine(root.FullName, fixtureName);
+            CopyDirectory(FindRepositoryFile("tests", fixtureName), copiedProject);
+            var projectPath = Path.Combine(copiedProject, fixtureName + ".csproj");
+            var sourcePath = Path.Combine(copiedProject, "Logging.cs");
+            var baselinePath = Path.Combine(root.FullName, "baseline.json");
+            var currentPath = Path.Combine(root.FullName, "current.json");
+            try
+            {
+                await RestoreAsync(projectPath);
+                await CaptureAsync(tool, projectPath, baselinePath);
+                await AssertClean(tool, projectPath, baselinePath);
+                var originalKeys = await InvokeBuiltFixtureAsync(projectPath, fixtureName, "FixedLevelSpecialAbsent");
+                await AssertManifestMatchesState(baselinePath, "FixedLevelSpecialAbsent", originalKeys);
+                Assert.Equal(["level", "value", "{OriginalFormat}"], originalKeys);
+
+                var original = await File.ReadAllTextAsync(sourcePath);
+                var renamed = original.Replace(
+                    "FixedLevelSpecialAbsent(ILogger logger, LogLevel level, int value)",
+                    "FixedLevelSpecialAbsent(ILogger logger, LogLevel severity, int value)",
+                    StringComparison.Ordinal);
+                Assert.NotEqual(original, renamed);
+                await File.WriteAllTextAsync(sourcePath, renamed);
+                await CaptureAsync(tool, projectPath, currentPath);
+
+                var renamedKeys = await InvokeBuiltFixtureAsync(projectPath, fixtureName, "FixedLevelSpecialAbsent");
+                await AssertManifestMatchesState(currentPath, "FixedLevelSpecialAbsent", renamedKeys);
+                Assert.Equal(["severity", "value", "{OriginalFormat}"], renamedKeys);
+                await AssertBreakingStateChange(tool, projectPath, baselinePath, currentPath, "FixedLevelSpecialAbsent");
+            }
+            finally
+            {
+                root.Delete(true);
+            }
+        }
     }
 
     [Fact]
@@ -183,6 +234,7 @@ public sealed class GeneratorDifferentialOracleTests
             Assert.Equal(["first", "second", "{OriginalFormat}"], actual["Mixed"]);
             Assert.Equal(["value", "{OriginalFormat}"], actual["DynamicEscapedPlaceholder"]);
             Assert.Equal(["first", "second", "{OriginalFormat}"], actual["ReorderedEscapedPlaceholder"]);
+            Assert.Equal(["level", "value", "{OriginalFormat}"], actual["FixedLevelSpecialAbsent"]);
         }
         finally
         {
@@ -271,6 +323,7 @@ public sealed class GeneratorDifferentialOracleTests
         {
             "DynamicEscapedPlaceholder" => "Logging.DynamicEscapedPlaceholder(logger, LogLevel.Warning, 2);",
             "ReorderedEscapedPlaceholder" => "Logging.ReorderedEscapedPlaceholder(logger, 1, 2);",
+            "FixedLevelSpecialAbsent" => "Logging.FixedLevelSpecialAbsent(logger, LogLevel.Warning, 2);",
             _ => "Logging.EscapedPlaceholder(logger, 2);"
         };
         var runner = $$"""
@@ -442,6 +495,7 @@ public sealed class GeneratorDifferentialOracleTests
         PrimaryLogging.Mixed(logger, 1, 2);
         PrimaryLogging.DynamicEscapedPlaceholder(logger, LogLevel.Warning, 8);
         PrimaryLogging.ReorderedEscapedPlaceholder(logger, 1, 2);
+        PrimaryLogging.FixedLevelSpecialAbsent(logger, LogLevel.Warning, 2);
     }
 
     private static void InvokeStable(ILogger logger)
@@ -458,6 +512,7 @@ public sealed class GeneratorDifferentialOracleTests
         StableLogging.Mixed(logger, 1, 2);
         StableLogging.DynamicEscapedPlaceholder(logger, LogLevel.Warning, 8);
         StableLogging.ReorderedEscapedPlaceholder(logger, 1, 2);
+        StableLogging.FixedLevelSpecialAbsent(logger, LogLevel.Warning, 2);
     }
 
     private static void CopyDirectory(string source, string destination)

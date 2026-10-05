@@ -335,8 +335,9 @@ Compatibility summary:
   WARNING  Fixed/dynamic or named LogLevel changes (use --severity warning to gate).
   INFO     Event/structured-state additions and message-template changes with unchanged structured state.
   A placeholder is one occurrence in the message template. Structured state is the unique, method-ordered
-  set of emitted properties produced by the generator. LoggerMessage.Define is selected only for non-generic
-  methods with a fixed attribute level, at most six template parameters, the same number of template occurrences as
+  set of emitted properties produced by the generator. Define eligibility uses the generator-effective
+  template-parameter list. LoggerMessage.Define is selected only for non-generic methods with a fixed attribute
+  level, at most six template parameters, the same number of template occurrences as
   template parameters, and matching
   template/parameter order after removing a leading @ and comparing ordinal-ignore-case. It preserves each matched
   placeholder's raw name as the emitted key, including @. Otherwise, generated state starts from the source code name

@@ -700,17 +700,17 @@ internal static class ManifestJson
         }
 
         var parameterIndexes = @event.Parameters.Select((parameter, index) => (parameter.Name, index)).ToDictionary(item => item.Name, item => item.index, StringComparer.Ordinal);
-        var expectedStateParameters = @event.Parameters
-            .Where(parameter => semantics.IsStructuredState(parameter.Name, dynamicLevel, @event.Placeholders))
-            .ToArray();
-        var expectedStateParameterNames = expectedStateParameters
+        var templateParameters = semantics.TemplateParameters(dynamicLevel, @event.Placeholders);
+        var expectedStateParameterNames = templateParameters
             .Select(parameter => parameter.Name)
             .ToHashSet(StringComparer.Ordinal);
         var usesLoggerMessageDefine = LoggerMessageGeneratorSemantics.UsesLoggerMessageDefine(
             @event.GenericArity,
             dynamicLevel,
-            expectedStateParameters
-                .Select(parameter => new LoggerMessageDefineParameter(parameter.Name, parameter.CodeName ?? parameter.Name))
+            templateParameters
+                .Select(parameter => new LoggerMessageDefineParameter(
+                    parameter.Name,
+                    @event.Parameters[parameterIndexes[parameter.Name]].CodeName ?? parameter.Name))
                 .ToArray(),
             @event.Placeholders);
         var structuredNames = new HashSet<string>(StringComparer.Ordinal);
@@ -719,7 +719,7 @@ internal static class ManifestJson
         {
             if (string.IsNullOrWhiteSpace(property.ParameterName) || string.IsNullOrWhiteSpace(property.EmittedName) || !structuredNames.Add(property.ParameterName) ||
                 !parameterIndexes.TryGetValue(property.ParameterName, out var index) || index <= lastIndex ||
-                !semantics.IsStructuredState(@event.Parameters[index].Name, dynamicLevel, @event.Placeholders))
+                !semantics.IsTemplateParameter(@event.Parameters[index].Name, dynamicLevel, @event.Placeholders))
             {
                 throw new ManifestValidationException("A manifest structured state model contains an invalid or out-of-order property.");
             }

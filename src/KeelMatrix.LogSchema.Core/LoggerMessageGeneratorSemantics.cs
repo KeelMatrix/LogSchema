@@ -27,8 +27,11 @@ internal sealed record LoggerMessageMethodSemantics(
 {
     internal GeneratorParameterSemantics Parameter(string name) => Parameters.Single(parameter => string.Equals(parameter.Name, name, StringComparison.Ordinal));
 
-    internal bool IsStructuredState(string parameterName, bool dynamicLevel, IReadOnlyList<Placeholder> placeholders) =>
-        LoggerMessageGeneratorSemantics.IsStructuredState(Parameter(parameterName).Roles, parameterName, LevelParameter, dynamicLevel, placeholders);
+    internal bool IsTemplateParameter(string parameterName, bool dynamicLevel, IReadOnlyList<Placeholder> placeholders) =>
+        LoggerMessageGeneratorSemantics.IsTemplateParameter(Parameter(parameterName).Roles, parameterName, LevelParameter, dynamicLevel, placeholders);
+
+    internal IReadOnlyList<GeneratorParameterSemantics> TemplateParameters(bool dynamicLevel, IReadOnlyList<Placeholder> placeholders) =>
+        Parameters.Where(parameter => IsTemplateParameter(parameter.Name, dynamicLevel, placeholders)).ToArray();
 }
 
 internal static class LoggerMessageGeneratorSemantics
@@ -297,13 +300,16 @@ internal static class LoggerMessageGeneratorSemantics
         return roles != GeneratorParameterRoles.None && string.Equals(FormatRole(roles), role, StringComparison.Ordinal);
     }
 
-    internal static bool IsStructuredState(
+    internal static bool IsTemplateParameter(
         GeneratorParameterRoles roles,
         string parameterName,
         string? levelParameter,
         bool dynamicLevel,
         IReadOnlyList<Placeholder> placeholders)
     {
+        // For the pinned generators, a fixed-level LogLevel parameter remains in
+        // TemplateParameters and emitted state; only the dynamic level parameter
+        // is consumed as the call's level argument.
         if (roles == GeneratorParameterRoles.None || roles.HasFlag(GeneratorParameterRoles.LogLevel) && !dynamicLevel)
         {
             return true;
