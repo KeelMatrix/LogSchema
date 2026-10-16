@@ -66,6 +66,8 @@ try {
 
     Assert-That ($validatorExitCode -ne 0) 'the repository validator must return failure when restore fails'
     Assert-That ($expectedFailureLine.Count -eq 1) 'the repository validator must report the injected restore failure'
+    # The nested process failure is expected; do not leak it to GitHub's outer pwsh shell.
+    $global:LASTEXITCODE = 0
     Write-Host 'Expected fail-closed negative control passed: injected dotnet restore exit 86 failed the validator.'
     Write-Host ("Expected failure detail: {0}" -f $expectedFailureLine[0].Trim())
 }
