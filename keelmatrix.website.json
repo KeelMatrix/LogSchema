@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "packages": {
+    "KeelMatrix.LogSchema": {
+      "visibility": "public-product",
+      "role": "primary"
+    }
+  }
+}

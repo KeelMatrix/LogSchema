@@ -314,6 +314,7 @@ $env:KEELMATRIX_NO_TELEMETRY = '1'
 
 $solution = Join-Path $repositoryRoot 'LogSchema.slnx'
 Invoke-Timed 'Reachable history hygiene' { Invoke-NestedPwsh -ArgumentList @('-NoProfile', '-NonInteractive', '-File', (Join-Path $repositoryRoot 'build/Test-HistoryHygiene.ps1'), '-RepositoryRoot', $repositoryRoot) }
+Invoke-Timed 'Website package metadata' { Invoke-NestedPwsh -ArgumentList @('-NoProfile', '-NonInteractive', '-File', (Join-Path $repositoryRoot 'build/Test-WebsiteMetadata.ps1'), '-RepositoryRoot', $repositoryRoot) }
 Invoke-Timed 'Restore solution' { dotnet restore $solution --configfile $nugetConfig @msbuildVersionArgument --nologo }
 foreach ($fixture in @(
         'fixtures/Phase0.Net8/Phase0.Net8.csproj',
