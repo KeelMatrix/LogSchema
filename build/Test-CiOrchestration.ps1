@@ -44,16 +44,43 @@ else {
 $probeRoot = Join-Path $tempParent "logschema-ci-orchestration-$([guid]::NewGuid().ToString('N'))"
 $null = New-Item -ItemType Directory -Path $probeRoot
 $pathBeforeProbe = $env:PATH
+$realDotnetPath = (Get-Command dotnet -CommandType Application -ErrorAction Stop).Source
+$solutionPath = Join-Path $repositoryRoot 'LogSchema.slnx'
+$realDotnetEnvironmentVariable = 'LOGSCHEMA_CI_ORCHESTRATION_REAL_DOTNET'
+$failedRestoreEnvironmentVariable = 'LOGSCHEMA_CI_ORCHESTRATION_FAIL_RESTORE_SOLUTION'
+$realDotnetEnvironmentBefore = [Environment]::GetEnvironmentVariable($realDotnetEnvironmentVariable)
+$failedRestoreEnvironmentBefore = [Environment]::GetEnvironmentVariable($failedRestoreEnvironmentVariable)
+$injectedFailureMarker = 'CI orchestration injected failure for solution restore'
 $validatorOutput = $null
 
 try {
+    [Environment]::SetEnvironmentVariable($realDotnetEnvironmentVariable, $realDotnetPath)
+    [Environment]::SetEnvironmentVariable($failedRestoreEnvironmentVariable, $solutionPath)
+
     if ($IsWindows -or $env:OS -eq 'Windows_NT') {
         $dotnetShim = Join-Path $probeRoot 'dotnet.cmd'
-        [IO.File]::WriteAllText($dotnetShim, "@echo off`r`nexit /b 86`r`n", [Text.Encoding]::ASCII)
+        $windowsShim = @'
+@echo off
+if /I "%~1"=="restore" if /I "%~2"=="%LOGSCHEMA_CI_ORCHESTRATION_FAIL_RESTORE_SOLUTION%" (
+    echo CI orchestration injected failure for solution restore 1>&2
+    exit /b 86
+)
+"%LOGSCHEMA_CI_ORCHESTRATION_REAL_DOTNET%" %*
+exit /b %ERRORLEVEL%
+'@
+        [IO.File]::WriteAllText($dotnetShim, $windowsShim.Replace("`n", "`r`n") + "`r`n", [Text.Encoding]::ASCII)
     }
     else {
         $dotnetShim = Join-Path $probeRoot 'dotnet'
-        [IO.File]::WriteAllText($dotnetShim, "#!/bin/sh`nexit 86`n", [Text.UTF8Encoding]::new($false))
+        $unixShim = @'
+#!/bin/sh
+if [ "${1-}" = "restore" ] && [ "${2-}" = "$LOGSCHEMA_CI_ORCHESTRATION_FAIL_RESTORE_SOLUTION" ]; then
+    printf '%s\n' 'CI orchestration injected failure for solution restore' >&2
+    exit 86
+fi
+exec "$LOGSCHEMA_CI_ORCHESTRATION_REAL_DOTNET" "$@"
+'@
+        [IO.File]::WriteAllText($dotnetShim, $unixShim.Replace("`r`n", "`n") + "`n", [Text.UTF8Encoding]::new($false))
         & chmod +x $dotnetShim
         Assert-That ($LASTEXITCODE -eq 0) 'the injected dotnet failure command must be executable'
     }
@@ -63,9 +90,11 @@ try {
     $validatorOutput = (& $pwshPath -NoProfile -NonInteractive -File $validatorPath 2>&1 | Out-String)
     $validatorExitCode = $LASTEXITCODE
     $expectedFailureLine = @($validatorOutput -split "`r?`n" | Where-Object { $_ -match 'Restore solution failed with exit code 86' } | Select-Object -First 1)
+    $injectedFailureLines = @($validatorOutput -split "`r?`n" | Where-Object { $_ -match [regex]::Escape($injectedFailureMarker) })
 
     Assert-That ($validatorExitCode -ne 0) 'the repository validator must return failure when restore fails'
     Assert-That ($expectedFailureLine.Count -eq 1) 'the repository validator must report the injected restore failure'
+    Assert-That ($injectedFailureLines.Count -eq 1) 'the dotnet shim must fail exactly the intended solution restore and forward every other invocation'
     # The nested process failure is expected; do not leak it to GitHub's outer pwsh shell.
     $global:LASTEXITCODE = 0
     Write-Host 'Expected fail-closed negative control passed: injected dotnet restore exit 86 failed the validator.'
@@ -79,6 +108,8 @@ catch {
 }
 finally {
     $env:PATH = $pathBeforeProbe
+    [Environment]::SetEnvironmentVariable($realDotnetEnvironmentVariable, $realDotnetEnvironmentBefore)
+    [Environment]::SetEnvironmentVariable($failedRestoreEnvironmentVariable, $failedRestoreEnvironmentBefore)
     Remove-Item -LiteralPath $probeRoot -Recurse -Force -ErrorAction Stop
 }
 
