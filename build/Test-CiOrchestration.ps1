@@ -44,7 +44,8 @@ else {
 $probeRoot = Join-Path $tempParent "logschema-ci-orchestration-$([guid]::NewGuid().ToString('N'))"
 $null = New-Item -ItemType Directory -Path $probeRoot
 $pathBeforeProbe = $env:PATH
-$realDotnetPath = (Get-Command dotnet -CommandType Application -ErrorAction Stop).Source
+$realDotnetCommand = Get-Command dotnet -CommandType Application -ErrorAction Stop | Select-Object -First 1
+$realDotnetPath = $realDotnetCommand.Source
 $solutionPath = Join-Path $repositoryRoot 'LogSchema.slnx'
 $realDotnetEnvironmentVariable = 'LOGSCHEMA_CI_ORCHESTRATION_REAL_DOTNET'
 $failedRestoreEnvironmentVariable = 'LOGSCHEMA_CI_ORCHESTRATION_FAIL_RESTORE_SOLUTION'
